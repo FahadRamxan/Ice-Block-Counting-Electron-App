@@ -1,12 +1,11 @@
+"""Flask app — minimal stub backend. To be redesigned step by step."""
 from flask import Flask
 from flask_cors import CORS
-from app.db import init_db
 from app.routes import nvrs_bp, recordings_bp, runs_bp
 
 def create_app():
     app = Flask(__name__)
     CORS(app)
-    init_db()
     @app.route('/api/status')
     def status():
         return {'status': 'ok', 'app': 'ice-factory-block-counter'}

@@ -13,20 +13,22 @@ const isDev = process.env.NODE_ENV === 'development';
 const FLASK_PORT = 5000;
 function startFlaskBackend() {
     return new Promise((resolve) => {
-        const backendDir = path_1.default.join(electron_1.app.getAppPath(), 'backend');
+        const appPath = electron_1.app.getAppPath();
+        const backendDir = path_1.default.join(appPath, 'backend');
+        const projectRoot = path_1.default.join(backendDir, '..');
         const flaskScript = path_1.default.join(backendDir, 'run_flask.py');
         if (!fs_1.default.existsSync(flaskScript)) {
             resolve();
             return;
         }
-        const appPath = electron_1.app.getAppPath();
         const venvPython = process.platform === 'win32'
             ? path_1.default.join(appPath, 'venv', 'Scripts', 'python.exe')
             : path_1.default.join(appPath, 'venv', 'bin', 'python');
         const pythonExe = fs_1.default.existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
+        // Run Flask with cwd = project root so model/video paths (and any relative paths) match CLI
         flaskProcess = (0, child_process_1.spawn)(pythonExe, [flaskScript, '--port', String(FLASK_PORT)], {
-            cwd: backendDir,
-            env: { ...process.env, FLASK_PORT: String(FLASK_PORT) },
+            cwd: projectRoot,
+            env: { ...process.env, FLASK_PORT: String(FLASK_PORT), PYTHONPATH: backendDir },
         });
         flaskProcess.stdout?.on('data', (data) => {
             const msg = data.toString();

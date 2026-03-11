@@ -28,12 +28,13 @@ Desktop app for counting ice blocks from NVR recordings (anti-theft). Supports *
 
 2. **Dahua NetSDK (for “Load recordings” and NVR listing)**  
    The app uses the same Dahua SDK as `Duahua_IceFactory_BlockCounter/DahuaRecordingViewer.py`. To see NVR recordings in this app, install the NetSDK wheel into **this project’s venv**:
-   - Get the wheel from the Dahua SDK package (e.g. `NetSDK-2.0.0.1-py3-none-win_amd64.whl`) or from `Duahua_IceFactory_BlockCounter/dist/` if present.
-   - Then:
-     ```bash
+   - **Get the wheel** — The wheel is not in this repo. Obtain `NetSDK-2.0.0.1-py3-none-win_amd64.whl` from the Dahua SDK package or from `Duahua_IceFactory_BlockCounter/dist/` if you have it. Save it somewhere (e.g. project folder or Downloads).
+   - **Install it** — Use the **real path** to the wheel file (replace the path below with yours):
+     ```powershell
      .\venv\Scripts\Activate.ps1
-     pip install "path\to\NetSDK-2.0.0.1-py3-none-win_amd64.whl"
+     pip install "C:\Users\fahad\Downloads\NetSDK-2.0.0.1-py3-none-win_amd64.whl"
      ```
+     **The wheel is not in this repo.** You must download or copy the `.whl` file first; use the path where it actually is (e.g. Downloads). Until the file exists at that path, pip will report "file does not exist". **To run the model without NetSDK**, use **Test video (optional)** in Settings instead.
    - If NetSDK is not installed, “Load recordings from NVR” will show a clear error and you can still use a **test video path** to run the model.
 
 3. **Frontend / Electron**
@@ -99,6 +100,31 @@ $env:VIDEO_PATH = "D:\path\to\video.mp4"
 $env:MODEL_PATH = "D:\path\to\best.pt"
 python Solution.py
 ```
+
+### Test the same flow as the frontend (demo script)
+
+With the Flask backend running, you can run the exact same API flow the UI uses:
+
+```powershell
+# Terminal 1: start backend
+.\venv\Scripts\Activate.ps1
+python backend/run_flask.py
+
+# Terminal 2: run demo (optionally with your video path)
+node scripts/demo-frontend-run.js "D:\Ice-Block-Counting-Electron-App\2025091165659 PM.mp4"
+```
+
+The script: (1) checks backend debug, (2) POSTs run-for-date, (3) polls job progress until done, (4) fetches results. Use this to confirm the backend and model work before testing in the app.
+
+### How to test in the app (frontend)
+
+1. **Start the app:** `npm run dev` (starts Vite + Electron; Electron starts Flask with project root as cwd).
+2. **Sign in** and open **Settings**.
+3. **Check backend:** Click **Check backend**. You should see **Model exists: Yes** and the project root path.
+4. **Run for date:** In **Run model for date**, enter your video path in **Test video (optional)** (e.g. `D:\Ice-Block-Counting-Electron-App\2025091165659 PM.mp4`), pick a date, click **Run for date**.
+5. Watch the progress box; when it shows **Completed**, the view switches to **Dashboard** and the new result appears in the table.
+
+If **Check backend** fails, start Flask manually from the project folder (`python backend/run_flask.py`) and try again.
 
 ## Data
 
