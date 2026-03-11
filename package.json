@@ -1,0 +1,30 @@
+{
+  "name": "ice-factory-block-counter",
+  "version": "1.0.0",
+  "description": "Ice block counting desktop app with multi-NVR support",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "npm run build:electron && concurrently \"npm run dev:react\" \"wait-on http://localhost:3000 && electron .\"",
+    "dev:react": "vite",
+    "dev:electron": "wait-on http://localhost:3000 && electron .",
+    "build": "npm run build:react && npm run build:electron",
+    "build:react": "vite build",
+    "build:electron": "tsc -p src/electron/tsconfig.json",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "concurrently": "^9.0.1",
+    "electron": "^33.2.1",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.1",
+    "wait-on": "^7.2.0"
+  }
+}
