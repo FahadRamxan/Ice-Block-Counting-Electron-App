@@ -872,6 +872,10 @@ button.icon-only:hover { background: rgba(248, 113, 113, 0.2); }
 /* ─── App shell (top nav, full pages) ─── */
 .app-shell .header,
 .app-shell .status-msg { display: none; }
+.app.app-shell {
+  position: relative;
+  isolation: isolate;
+}
 .shell-header {
   position: sticky;
   top: 0;
@@ -976,6 +980,8 @@ button.icon-only:hover { background: rgba(248, 113, 113, 0.2); }
   border-left: 3px solid var(--warn);
 }
 .shell-main {
+  position: relative;
+  z-index: 1;
   max-width: 1200px;
   margin: 0 auto;
   padding: 32px 24px 64px;

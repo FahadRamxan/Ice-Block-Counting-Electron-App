@@ -16,6 +16,7 @@ import {
 import { api, nvrs as nvrsApi, recordings as recordingsApi, runs, type TestVideoRunResult } from './lib/api';
 import type { RecordingSlot } from './lib/api';
 import AuthPage from './AuthPage';
+import FloatingIceBackdrop from './FloatingIceBackdrop';
 import './index.css';
 
 const AUTH_STORAGE_KEY = 'awan_ice_user';
@@ -213,8 +214,9 @@ export default function App() {
   if (!user) return <AuthPage onLogin={handleLogin} />;
   if (loading) {
     return (
-      <div className="app">
-        <main className="shell-main" style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
+      <div className="app app-shell">
+        <FloatingIceBackdrop />
+        <main className="shell-main" style={{ display: 'flex', justifyContent: 'center', padding: 48, zIndex: 1 }}>
           <Loader2 size={40} className="spin" />
         </main>
       </div>
@@ -226,6 +228,7 @@ export default function App() {
 
   return (
     <div className="app app-shell">
+      <FloatingIceBackdrop />
       <header className="shell-header">
         <div className="shell-header-bar">
           <button type="button" className="shell-brand" onClick={() => setPage('home')}>
