@@ -947,6 +947,9 @@ button.icon-only:hover { background: rgba(248, 113, 113, 0.2); }
 :root[data-theme='light'] .shell-header {
   background: rgba(255, 255, 255, 0.9);
 }
+.shell-header {
+  overflow: visible;
+}
 .shell-header-bar {
   max-width: 1280px;
   margin: 0 auto;
@@ -957,7 +960,7 @@ button.icon-only:hover { background: rgba(248, 113, 113, 0.2); }
   flex-wrap: nowrap;
   min-height: 48px;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   scrollbar-width: none;
 }
 .shell-header-bar::-webkit-scrollbar {
@@ -1104,6 +1107,15 @@ button.icon-only:hover { background: rgba(248, 113, 113, 0.2); }
   animation: accountDrop 0.18s ease;
   overflow: hidden;
 }
+/* Portal to body — never clipped by header overflow */
+.shell-account-dropdown-fixed {
+  position: fixed;
+  z-index: 10000;
+  width: 260px;
+  min-width: 260px;
+  overflow: visible;
+  box-sizing: border-box;
+}
 :root[data-theme='light'] .shell-account-dropdown {
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
 }
@@ -1175,15 +1187,21 @@ html[dir='rtl'] .shell-account-dropdown {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 14px 16px;
+  min-height: 48px;
   border: none;
-  background: transparent;
+  background: rgba(15, 23, 42, 0.35);
   color: var(--text);
-  font-size: 0.875rem;
-  font-weight: 600;
+  font-size: 0.9rem;
+  font-weight: 700;
   cursor: pointer;
   text-align: start;
   transition: background 0.12s;
+  box-sizing: border-box;
+}
+:root[data-theme='light'] .shell-account-logout {
+  background: #f8fafc;
+  color: #0f172a;
 }
 .shell-account-logout:hover {
   background: rgba(248, 113, 113, 0.12);

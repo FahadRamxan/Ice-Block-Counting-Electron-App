@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Play,
   Loader2,
@@ -73,12 +74,37 @@ export default function App() {
   const [runProgress, setRunProgress] = useState<{ done: number; total: number; pct: number; line: string } | null>(null);
   const [maxFrames, setMaxFrames] = useState(100);
   const [accountOpen, setAccountOpen] = useState(false);
-  const accountRef = useRef<HTMLDivElement>(null);
+  const accountBtnRef = useRef<HTMLButtonElement>(null);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+  const [accountMenuPos, setAccountMenuPos] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!accountOpen || !accountBtnRef.current) {
+      if (!accountOpen) setAccountMenuPos(null);
+      return;
+    }
+    const place = () => {
+      const r = accountBtnRef.current!.getBoundingClientRect();
+      const menuW = 260;
+      const left = Math.min(Math.max(8, r.right - menuW), window.innerWidth - menuW - 8);
+      setAccountMenuPos({ top: r.bottom + 8, left });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [accountOpen]);
 
   useEffect(() => {
     if (!accountOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (accountRef.current && !accountRef.current.contains(e.target as Node)) setAccountOpen(false);
+      const t = e.target as Node;
+      if (accountBtnRef.current?.contains(t)) return;
+      if (accountMenuRef.current?.contains(t)) return;
+      setAccountOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setAccountOpen(false);
@@ -333,8 +359,9 @@ export default function App() {
               </button>
             </div>
           </div>
-          <div className="shell-account" ref={accountRef}>
+          <div className="shell-account">
             <button
+              ref={accountBtnRef}
               type="button"
               className={`shell-account-btn${accountOpen ? ' open' : ''}`}
               onClick={() => setAccountOpen((o) => !o)}
@@ -347,32 +374,40 @@ export default function App() {
                 {(user.name || user.email || '?').trim().charAt(0).toUpperCase()}
               </span>
             </button>
-            {accountOpen && (
-              <div className="shell-account-dropdown" role="menu">
-                <div className="shell-account-head">
-                  <div className="shell-account-avatar" aria-hidden>
-                    {(user.name || user.email || '?').trim().charAt(0).toUpperCase()}
-                  </div>
-                  <div className="shell-account-meta">
-                    <div className="shell-account-name">{user.name}</div>
-                    <div className="shell-account-email">{user.email}</div>
-                  </div>
-                </div>
-                <div className="shell-account-divider" />
-                <button
-                  type="button"
-                  className="shell-account-logout"
-                  role="menuitem"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    handleLogout();
-                  }}
+            {accountOpen &&
+              accountMenuPos &&
+              createPortal(
+                <div
+                  ref={accountMenuRef}
+                  className="shell-account-dropdown shell-account-dropdown-fixed"
+                  style={{ top: accountMenuPos.top, left: accountMenuPos.left }}
+                  role="menu"
                 >
-                  <LogOut size={18} aria-hidden />
-                  {t('logOut')}
-                </button>
-              </div>
-            )}
+                  <div className="shell-account-head">
+                    <div className="shell-account-avatar" aria-hidden>
+                      {(user.name || user.email || '?').trim().charAt(0).toUpperCase()}
+                    </div>
+                    <div className="shell-account-meta">
+                      <div className="shell-account-name">{user.name}</div>
+                      <div className="shell-account-email">{user.email}</div>
+                    </div>
+                  </div>
+                  <div className="shell-account-divider" />
+                  <button
+                    type="button"
+                    className="shell-account-logout"
+                    role="menuitem"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      handleLogout();
+                    }}
+                  >
+                    <LogOut size={18} aria-hidden />
+                    {t('logOut')}
+                  </button>
+                </div>,
+                document.body,
+              )}
           </div>
         </div>
         {backendDown && <p className="shell-banner">{t('backendUnreachable')}</p>}
