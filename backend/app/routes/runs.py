@@ -1,7 +1,9 @@
-"""Runs API — test video (Solution.py pipeline) + stubs for legacy routes."""
+"""Runs API — test video (Solution.py pipeline) + statistics."""
 import os
 import threading
+from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
+from app.db import insert_run_event, get_conn, init_db, seed_demo_statistics_if_empty
 
 bp = Blueprint('runs', __name__, url_prefix='/api/runs')
 
@@ -62,6 +64,17 @@ def _run_test_video_thread(video_path: str, model_path: str, max_frames: int | N
             _job["current"] = "Done."
             for line in out.get("logs", [])[-50:]:
                 _job["progress"].append({"line": line})
+            try:
+                init_db()
+                insert_run_event(
+                    datetime.utcnow().date().isoformat(),
+                    int(out.get("total_unique_blocks") or 0),
+                    int(out.get("left_platform") or 0),
+                    int(out.get("still_on_platform_end") or out.get("still_on_platform") or 0),
+                    source="test_video",
+                )
+            except Exception:
+                pass
     except Exception as e:
         _job["error"] = str(e)
         _job["current"] = str(e)
@@ -69,9 +82,108 @@ def _run_test_video_thread(video_path: str, model_path: str, max_frames: int | N
         _job["running"] = False
 
 
+def _statistics_series(granularity: str, date_from: str, date_to: str):
+    init_db()
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            '''SELECT run_date, total_unique_blocks, left_platform, still_on_platform
+               FROM run_events WHERE run_date >= ? AND run_date <= ? ORDER BY run_date''',
+            (date_from, date_to),
+        ).fetchall()
+    finally:
+        conn.close()
+    from collections import defaultdict
+    buckets = defaultdict(lambda: {"blocks": 0, "runs": 0, "left": 0, "still": 0})
+
+    def week_key(d: str):
+        dt = datetime.strptime(d, "%Y-%m-%d")
+        y, w, _ = dt.isocalendar()
+        return f"{y}-W{w:02d}"
+
+    for r in rows:
+        d = r["run_date"]
+        if granularity == "day":
+            k = d
+        elif granularity == "week":
+            k = week_key(d)
+        elif granularity == "month":
+            k = d[:7]
+        else:
+            k = d[:4]
+        buckets[k]["blocks"] += int(r["total_unique_blocks"] or 0)
+        buckets[k]["runs"] += 1
+        buckets[k]["left"] += int(r["left_platform"] or 0)
+        buckets[k]["still"] += int(r["still_on_platform"] or 0)
+
+    keys = sorted(buckets.keys())
+    return [
+        {
+            "label": k,
+            "total_blocks": buckets[k]["blocks"],
+            "run_count": buckets[k]["runs"],
+            "left_platform": buckets[k]["left"],
+            "still_on_platform": buckets[k]["still"],
+        }
+        for k in keys
+    ]
+
+
+@bp.route('/statistics', methods=['GET'])
+def statistics():
+    """granularity=day|week|month|year; optional from=YYYY-MM-DD, to=YYYY-MM-DD"""
+    g = (request.args.get("granularity") or "day").lower()
+    if g not in ("day", "week", "month", "year"):
+        g = "day"
+    to_s = request.args.get("to") or datetime.utcnow().date().isoformat()
+    to_dt = datetime.strptime(to_s[:10], "%Y-%m-%d")
+    if g == "day":
+        n = int(request.args.get("days") or 30)
+        from_dt = to_dt - timedelta(days=max(1, n) - 1)
+    elif g == "week":
+        n = int(request.args.get("weeks") or 12)
+        from_dt = to_dt - timedelta(weeks=max(1, n))
+    elif g == "month":
+        n = int(request.args.get("months") or 12)
+        from_dt = to_dt - timedelta(days=31 * max(1, n))
+    else:
+        n = int(request.args.get("years") or 5)
+        from_dt = datetime(to_dt.year - max(1, n) + 1, 1, 1)
+    from_s = from_dt.date().isoformat()
+    series = _statistics_series(g, from_s, to_s)
+    totals = {
+        "total_blocks": sum(p["total_blocks"] for p in series),
+        "total_runs": sum(p["run_count"] for p in series),
+        "buckets": len(series),
+    }
+    return jsonify({
+        "granularity": g,
+        "from": from_s,
+        "to": to_s,
+        "series": series,
+        "totals": totals,
+    })
+
+
+@bp.route('/statistics/seed-demo', methods=['POST'])
+def statistics_seed_demo():
+    seed_demo_statistics_if_empty()
+    return jsonify({"ok": True})
+
+
 @bp.route('/results', methods=['GET'])
 def list_results():
-    return jsonify([])
+    init_db()
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            '''SELECT id, run_date, nvr_name, channel, total_unique_blocks, left_platform,
+                      still_on_platform, source, created_at FROM run_events
+               ORDER BY created_at DESC LIMIT 200'''
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
+    finally:
+        conn.close()
 
 @bp.route('/results/summary', methods=['GET'])
 def summary():

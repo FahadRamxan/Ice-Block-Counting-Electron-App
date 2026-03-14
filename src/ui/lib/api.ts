@@ -66,11 +66,6 @@ export const runs = {
   },
   summary: (date?: string) =>
     api<SummaryRow[]>(`/api/runs/results/summary${date ? `?date=${date}` : ''}`),
-  runForDate: (date: string, testVideoPath?: string) =>
-    api<{ status: string; date: string; nvrs: number }>('/api/runs/run-for-date', {
-      method: 'POST',
-      body: JSON.stringify({ date, test_video_path: testVideoPath?.trim() || undefined }),
-    }),
   jobProgress: () =>
     api<{
       running: boolean;
@@ -97,20 +92,47 @@ export const runs = {
     }),
   debug: () =>
     api<{ project_root: string; default_model_path: string; model_exists: boolean; backend_cwd: string }>('/api/runs/debug'),
+  statistics: (params: {
+    granularity: 'day' | 'week' | 'month' | 'year';
+    days?: number;
+    weeks?: number;
+    months?: number;
+    years?: number;
+    to?: string;
+  }) => {
+    const sp = new URLSearchParams();
+    sp.set('granularity', params.granularity);
+    if (params.days != null) sp.set('days', String(params.days));
+    if (params.weeks != null) sp.set('weeks', String(params.weeks));
+    if (params.months != null) sp.set('months', String(params.months));
+    if (params.years != null) sp.set('years', String(params.years));
+    if (params.to) sp.set('to', params.to);
+    return api<{
+      granularity: string;
+      from: string;
+      to: string;
+      series: { label: string; total_blocks: number; run_count: number; left_platform: number; still_on_platform: number }[];
+      totals: { total_blocks: number; total_runs: number; buckets: number };
+    }>(`/api/runs/statistics?${sp.toString()}`);
+  },
+  seedDemoStats: () => api<{ ok: boolean }>('/api/runs/statistics/seed-demo', { method: 'POST', body: '{}' }),
 };
 
 export interface RunResult {
   id: number;
-  nvr_id: number;
-  nvr_name: string;
-  channel: number;
-  record_date: string;
-  start_time: string;
-  end_time: string;
-  ice_block_count: number;
-  status: string;
-  video_path: string | null;
+  run_date?: string;
+  nvr_id?: number | null;
+  nvr_name?: string | null;
+  channel?: number | null;
+  total_unique_blocks?: number;
+  left_platform?: number;
+  still_on_platform?: number;
+  source?: string;
   created_at: string;
+  record_date?: string;
+  ice_block_count?: number;
+  status?: string;
+  video_path?: string | null;
 }
 
 export interface SummaryRow {

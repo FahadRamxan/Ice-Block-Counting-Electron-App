@@ -16,17 +16,19 @@ import {
   Sun,
   Moon,
   LogOut,
+  BarChart3,
 } from 'lucide-react';
 import { useThemeLanguage } from './ThemeLanguageContext';
 import { api, nvrs as nvrsApi, recordings as recordingsApi, runs, type TestVideoRunResult } from './lib/api';
 import type { RecordingSlot } from './lib/api';
 import AuthPage from './AuthPage';
 import FloatingIceBackdrop from './FloatingIceBackdrop';
+import StatisticsPage from './StatisticsPage';
 import './index.css';
 
 const AUTH_STORAGE_KEY = 'awan_ice_user';
 
-type Page = 'home' | 'nvrs' | 'recordings' | 'test';
+type Page = 'home' | 'nvrs' | 'recordings' | 'test' | 'statistics';
 
 function getStoredUser(): { name: string; email: string } | null {
   try {
@@ -328,6 +330,9 @@ export default function App() {
             <button type="button" className={page === 'test' ? 'active' : ''} onClick={() => setPage('test')}>
               <Play size={18} /> {t('navTestModel')}
             </button>
+            <button type="button" className={page === 'statistics' ? 'active' : ''} onClick={() => setPage('statistics')}>
+              <BarChart3 size={18} /> {t('navStatistics')}
+            </button>
           </nav>
           <div className="shell-toolbar" aria-label="Display">
             <div className="shell-toggle-group shell-toggle-compact" role="group" aria-label={t('themeLight')}>
@@ -429,6 +434,9 @@ export default function App() {
                 <button type="button" onClick={() => setPage('test')}>
                   {t('testModel')}
                 </button>
+                <button type="button" onClick={() => setPage('statistics')}>
+                  {t('navStatistics')}
+                </button>
               </div>
             </div>
             <div className="page-cards">
@@ -450,9 +458,16 @@ export default function App() {
                 <h3>{t('tileTestTitle')}</h3>
                 <p>{t('tileTestDesc')}</p>
               </article>
+              <article className="tile" onClick={() => setPage('statistics')} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setPage('statistics')}>
+                <BarChart3 size={28} />
+                <h3>{t('tileStatsTitle')}</h3>
+                <p>{t('tileStatsDesc')}</p>
+              </article>
             </div>
           </div>
         )}
+
+        {page === 'statistics' && <StatisticsPage t={t} />}
 
         {page === 'nvrs' && (
           <div className="page page-nvrs">
