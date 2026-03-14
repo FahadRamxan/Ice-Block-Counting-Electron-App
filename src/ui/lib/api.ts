@@ -38,12 +38,21 @@ export interface RecordingsByDateResponse {
   nvr_id: number;
   nvr_name: string;
   date: string;
-  recordings: RecordingSlot[];
+  nvr_channels?: number;
+  recordings_by_channel: Record<string, RecordingSlot[] | { error?: string }>;
+  error?: string | null;
 }
 
 export const recordings = {
-  byDate: (nvrId: number, date: string) =>
-    api<RecordingsByDateResponse>(`/api/recordings/by-date?nvr_id=${nvrId}&date=${encodeURIComponent(date)}`),
+  byDate: (nvrId: number, date: string, channels: 'all' | number[]) =>
+    api<RecordingsByDateResponse>('/api/recordings/by-date', {
+      method: 'POST',
+      body: JSON.stringify({
+        nvr_id: nvrId,
+        date,
+        channels: channels === 'all' ? 'all' : channels,
+      }),
+    }),
 };
 
 export const runs = {
@@ -63,7 +72,21 @@ export const runs = {
       body: JSON.stringify({ date, test_video_path: testVideoPath?.trim() || undefined }),
     }),
   jobProgress: () =>
-    api<{ running: boolean; progress: JobProgressItem[]; current: string | null; error: string | null }>('/api/runs/job-progress'),
+    api<{
+      running: boolean;
+      progress: JobProgressItem[];
+      current: string | null;
+      error: string | null;
+      result?: TestVideoRunResult | null;
+    }>('/api/runs/job-progress'),
+  testVideo: (videoPath: string, maxFrames?: number | null) =>
+    api<{ status: string; video_path: string; max_frames?: number | null }>('/api/runs/test-video', {
+      method: 'POST',
+      body: JSON.stringify({
+        video_path: videoPath.trim(),
+        max_frames: maxFrames != null && maxFrames > 0 ? maxFrames : undefined,
+      }),
+    }),
   debug: () =>
     api<{ project_root: string; default_model_path: string; model_exists: boolean; backend_cwd: string }>('/api/runs/debug'),
 };
@@ -91,13 +114,28 @@ export interface SummaryRow {
 }
 
 export interface JobProgressItem {
-  nvr_id: number;
-  nvr_name: string;
-  channel: number | null;
+  nvr_id?: number;
+  nvr_name?: string;
+  channel?: number | null;
   start_time?: string;
   end_time?: string;
   ice_block_count?: number;
-  status: string;
+  status?: string;
   message?: string;
   error?: string;
+  line?: string;
+}
+
+export interface TestVideoRunResult {
+  error: string | null;
+  logs: string[];
+  total_unique_blocks?: number;
+  still_on_platform_end?: number;
+  left_platform?: number;
+  output_csv?: string;
+  output_video?: string;
+  video_width?: number;
+  video_height?: number;
+  fps?: number;
+  frames_processed?: number;
 }

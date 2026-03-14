@@ -1,1 +1,12 @@
 node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# Model runs — large binaries (GitHub limit 100MB)
+backend/data/outputs/
+*.avi
+
+# Local DB + secrets (regenerated locally)
+backend/data/ice_factory.db
+backend/data/credentials.txt
