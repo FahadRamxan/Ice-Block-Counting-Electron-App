@@ -79,6 +79,14 @@ export const runs = {
       error: string | null;
       result?: TestVideoRunResult | null;
     }>('/api/runs/job-progress'),
+  runForDate: (body: { date: string; nvr_id?: number; channels?: number[] }) =>
+    api<{
+      status: string;
+      date: string;
+      nvr_id?: number;
+      channels_1_15: number[];
+      message: string;
+    }>('/api/runs/run-for-date', { method: 'POST', body: JSON.stringify(body) }),
   testVideo: (videoPath: string, maxFrames?: number | null) =>
     api<{ status: string; video_path: string; max_frames?: number | null }>('/api/runs/test-video', {
       method: 'POST',

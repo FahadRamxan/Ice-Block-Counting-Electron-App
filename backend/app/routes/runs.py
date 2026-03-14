@@ -79,7 +79,28 @@ def summary():
 
 @bp.route('/run-for-date', methods=['POST'])
 def run_for_date():
-    return jsonify({'status': 'started', 'date': (request.get_json() or {}).get('date', ''), 'nvrs': 0})
+    """Body: date, nvr_id?, channels?: [1..15] — records intent; full NVR download pipeline optional."""
+    data = request.get_json() or {}
+    ch = data.get('channels')
+    out_ch = []
+    if isinstance(ch, list):
+        for x in ch:
+            try:
+                n = int(x)
+                if 1 <= n <= 15:
+                    out_ch.append(n)
+            except (TypeError, ValueError):
+                pass
+        out_ch = sorted(set(out_ch))
+    if not out_ch:
+        out_ch = list(range(1, 16))
+    return jsonify({
+        'status': 'accepted',
+        'date': data.get('date', ''),
+        'nvr_id': data.get('nvr_id'),
+        'channels_1_15': out_ch,
+        'message': 'Selection recorded. Wire Dahua download + model per slot to execute runs.',
+    })
 
 @bp.route('/job-progress', methods=['GET'])
 def job_progress():

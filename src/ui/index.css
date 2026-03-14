@@ -1240,6 +1240,7 @@ html[dir='rtl'] .shell-account {
   padding: var(--space-lg);
   margin-bottom: var(--space-lg);
   backdrop-filter: blur(12px);
+  overflow: visible;
 }
 .panel h2 { margin: 0 0 var(--space-md); font-size: 1rem; font-weight: 600; }
 .form-grid {
@@ -1348,13 +1349,20 @@ html[dir='rtl'] .shell-account {
 .tile h3 { margin: 0 0 8px; font-size: 1.1rem; }
 .tile p { margin: 0 0 12px; font-size: 0.875rem; color: var(--text-muted); line-height: 1.45; }
 .tile-meta { font-size: 0.8rem; color: var(--accent); font-weight: 600; }
+.panel-toolbar {
+  overflow: visible;
+}
 .panel-toolbar .toolbar-row {
   display: flex;
   flex-wrap: wrap;
   gap: 20px;
   align-items: flex-end;
+  overflow: visible;
 }
 .panel-toolbar .form-group { min-width: 160px; flex: 0 1 auto; }
+.panel-toolbar .channel-multiselect-wrap {
+  flex: 0 0 auto;
+}
 .input-with-icon {
   display: flex;
   align-items: center;
@@ -1417,6 +1425,141 @@ html[dir='rtl'] .shell-account {
 }
 :root[data-theme='light'] .chip.active {
   background: rgba(14, 165, 233, 0.15);
+}
+
+/* Channels 1–15 multi-select dropdown — panel wider than trigger so grid stays inside border */
+.channel-multiselect-wrap {
+  position: relative;
+  min-width: 200px;
+  max-width: 100%;
+  z-index: 70;
+  overflow: visible;
+}
+.channel-multiselect {
+  position: relative;
+  overflow: visible;
+}
+.channel-multiselect-trigger {
+  width: 100%;
+  min-width: 200px;
+  max-width: min(320px, 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.85);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+:root[data-theme='light'] .channel-multiselect-trigger {
+  background: #fff;
+}
+.channel-multiselect-trigger:hover {
+  border-color: var(--accent);
+}
+.channel-multiselect-trigger .flip {
+  transform: rotate(180deg);
+  transition: transform 0.2s;
+}
+.channel-multiselect-trigger-label {
+  text-align: start;
+  line-height: 1.3;
+  white-space: normal;
+  overflow: visible;
+  word-break: break-word;
+}
+.channel-multiselect-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: auto;
+  z-index: 80;
+  /* Wide enough for full “Channel N” / Urdu labels (3 columns) */
+  width: min(520px, calc(100vw - 32px));
+  min-width: min(520px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 12px 16px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  overflow: visible;
+}
+:root[data-theme='light'] .channel-multiselect-panel {
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.15);
+}
+html[dir='rtl'] .channel-multiselect-panel {
+  left: auto;
+  right: 0;
+}
+.channel-multiselect-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.btn-linkish {
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.btn-linkish:hover {
+  background: rgba(56, 189, 248, 0.1);
+}
+.channel-multiselect-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  gap: 10px 16px;
+  width: 100%;
+}
+.channel-multiselect-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  padding: 10px 10px;
+  border-radius: 8px;
+  transition: background 0.1s;
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+}
+.channel-multiselect-item span {
+  overflow: visible;
+  text-overflow: unset;
+  line-height: 1.35;
+  flex: 1;
+  min-width: 0;
+}
+.channel-multiselect-item:hover {
+  background: var(--bg-card-hover);
+}
+.channel-multiselect-item input {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.page-recordings .shell-main,
+.page-recordings {
+  overflow-x: visible;
 }
 
 /* Theme + language toggles — compact, one row */

@@ -11,6 +11,7 @@ import {
   Plus,
   Calendar,
   ChevronRight,
+  ChevronDown,
   Sun,
   Moon,
   LogOut,
@@ -53,8 +54,13 @@ export default function App() {
   // Recordings
   const [recNvrId, setRecNvrId] = useState<number | ''>('');
   const [recDate, setRecDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [channelMode, setChannelMode] = useState<'all' | 'pick'>('all');
-  const [channelPick, setChannelPick] = useState<number[]>([]);
+  /** Cameras 1–15 (UI); API uses 0–14. */
+  const [recChannelsSelected, setRecChannelsSelected] = useState<number[]>(() =>
+    Array.from({ length: 15 }, (_, i) => i + 1),
+  );
+  const [channelMenuOpen, setChannelMenuOpen] = useState(false);
+  const channelMenuRef = useRef<HTMLDivElement>(null);
+  const [runForDateMsg, setRunForDateMsg] = useState<string | null>(null);
   const [recLoading, setRecLoading] = useState(false);
   const [recData, setRecData] = useState<Awaited<ReturnType<typeof recordingsApi.byDate>> | null>(null);
   const [recError, setRecError] = useState<string | null>(null);
@@ -84,6 +90,15 @@ export default function App() {
       document.removeEventListener('keydown', onKey);
     };
   }, [accountOpen]);
+
+  useEffect(() => {
+    if (!channelMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (channelMenuRef.current && !channelMenuRef.current.contains(e.target as Node)) setChannelMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [channelMenuOpen]);
 
   const loadNvrs = useCallback(async () => {
     setNvrLoading(true);
@@ -148,17 +163,17 @@ export default function App() {
 
   const loadRecordings = async () => {
     if (recNvrId === '' || !recDate) return;
+    if (recChannelsSelected.length === 0) {
+      setRecError(t('channelsPickOne'));
+      return;
+    }
     setRecLoading(true);
     setRecError(null);
     setRecData(null);
+    setRunForDateMsg(null);
     try {
-      const channels =
-        channelMode === 'all'
-          ? ('all' as const)
-          : channelPick.length
-            ? channelPick
-            : ('all' as const);
-      const data = await recordingsApi.byDate(Number(recNvrId), recDate, channels);
+      const zeroBased = [...recChannelsSelected].sort((a, b) => a - b).map((c) => c - 1);
+      const data = await recordingsApi.byDate(Number(recNvrId), recDate, zeroBased);
       setRecData(data);
     } catch (e) {
       setRecError((e as Error).message);
@@ -167,8 +182,28 @@ export default function App() {
     }
   };
 
-  const toggleChannel = (ch: number) => {
-    setChannelPick((prev) => (prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch].sort((a, b) => a - b)));
+  const toggleRecChannel = (ch: number) => {
+    setRecChannelsSelected((prev) =>
+      prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch].sort((a, b) => a - b),
+    );
+  };
+
+  const runModelOnSelection = async () => {
+    if (recNvrId === '' || !recDate || recChannelsSelected.length === 0) {
+      setRunForDateMsg(t('channelsPickOne'));
+      return;
+    }
+    setRunForDateMsg(null);
+    try {
+      const r = await runs.runForDate({
+        date: recDate,
+        nvr_id: Number(recNvrId),
+        channels: recChannelsSelected,
+      });
+      setRunForDateMsg(r.message || t('runModelChannelsStub'));
+    } catch (e) {
+      setRunForDateMsg((e as Error).message);
+    }
   };
 
   const handleRunSolutionVideo = async () => {
@@ -244,9 +279,6 @@ export default function App() {
       </div>
     );
   }
-
-  const nCh = recData?.nvr_channels ?? 16;
-  const channelOptions = Array.from({ length: nCh }, (_, i) => i);
 
   return (
     <div className="app app-shell">
@@ -462,6 +494,9 @@ export default function App() {
               <p className="page-sub">{t('recSub')}</p>
             </div>
             <section className="panel panel-toolbar">
+              <p className="form-hint" style={{ marginBottom: 14 }}>
+                {t('channelsMultiHint')}
+              </p>
               <div className="toolbar-row">
                 <div className="form-group">
                   <label>{t('labelNvr')}</label>
@@ -485,38 +520,87 @@ export default function App() {
                     <input type="date" value={recDate} onChange={(e) => setRecDate(e.target.value)} />
                   </div>
                 </div>
-                <div className="form-group">
-                  <label>{t('labelChannels')}</label>
-                  <select className="select-lg" value={channelMode} onChange={(e) => setChannelMode(e.target.value as 'all' | 'pick')}>
-                    <option value="all">{t('channelsAll')}</option>
-                    <option value="pick">{t('channelsPick')}</option>
-                  </select>
+                <div className="form-group channel-multiselect-wrap" ref={channelMenuRef}>
+                  <label>{t('channelsMultiLabel')} (1–15)</label>
+                  <div className="channel-multiselect">
+                    <button
+                      type="button"
+                      className="channel-multiselect-trigger"
+                      onClick={() => setChannelMenuOpen((o) => !o)}
+                      aria-expanded={channelMenuOpen}
+                    >
+                      <span className="channel-multiselect-trigger-label" title={
+                        recChannelsSelected.length === 15
+                          ? t('channelsAll')
+                          : recChannelsSelected.length === 0
+                            ? t('channelsPlaceholder')
+                            : t('channelsSelectedCount', { n: recChannelsSelected.length })
+                      }>
+                        {recChannelsSelected.length === 15
+                          ? t('channelsAll')
+                          : recChannelsSelected.length === 0
+                            ? t('channelsPlaceholder')
+                            : t('channelsSelectedCount', { n: recChannelsSelected.length })}
+                      </span>
+                      <ChevronDown size={18} className={channelMenuOpen ? 'flip' : ''} />
+                    </button>
+                    {channelMenuOpen && (
+                      <div className="channel-multiselect-panel" role="listbox">
+                        <div className="channel-multiselect-actions">
+                          <button
+                            type="button"
+                            className="btn-linkish"
+                            onClick={() => setRecChannelsSelected(Array.from({ length: 15 }, (_, i) => i + 1))}
+                          >
+                            {t('channelsSelectAll')}
+                          </button>
+                          <button type="button" className="btn-linkish" onClick={() => setRecChannelsSelected([])}>
+                            {t('channelsClear')}
+                          </button>
+                        </div>
+                        <div className="channel-multiselect-grid">
+                          {Array.from({ length: 15 }, (_, i) => i + 1).map((ch) => (
+                            <label key={ch} className="channel-multiselect-item">
+                              <input
+                                type="checkbox"
+                                checked={recChannelsSelected.includes(ch)}
+                                onChange={() => toggleRecChannel(ch)}
+                              />
+                              <span>{t('channelN')} {ch}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="form-group form-group-actions">
                   <label className="visually-hidden">{t('loadRecordings')}</label>
-                  <button type="button" className="primary" disabled={recNvrId === '' || recLoading} onClick={loadRecordings}>
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={recNvrId === '' || recLoading || recChannelsSelected.length === 0}
+                    onClick={loadRecordings}
+                  >
                     {recLoading ? <Loader2 size={18} className="spin" /> : <Film size={18} />}
                     {t('loadRecordings')}
                   </button>
                 </div>
-              </div>
-              {channelMode === 'pick' && (
-                <div className="channel-chips">
-                  <span className="chips-label">{t('chipsHint')}</span>
-                  <div className="chips">
-                    {channelOptions.map((ch) => (
-                      <button
-                        key={ch}
-                        type="button"
-                        className={channelPick.includes(ch) ? 'chip active' : 'chip'}
-                        onClick={() => toggleChannel(ch)}
-                      >
-                        {t('channelN')} {ch}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="form-hint">{t('chipsFoot')}</p>
+                <div className="form-group form-group-actions">
+                  <label className="visually-hidden">{t('runModelOnChannels')}</label>
+                  <button
+                    type="button"
+                    disabled={recNvrId === '' || recChannelsSelected.length === 0}
+                    onClick={runModelOnSelection}
+                  >
+                    <Play size={18} /> {t('runModelOnChannels')}
+                  </button>
                 </div>
+              </div>
+              {runForDateMsg && (
+                <p className="form-hint" style={{ marginTop: 12 }}>
+                  {runForDateMsg}
+                </p>
               )}
             </section>
             {recError && (
@@ -538,13 +622,16 @@ export default function App() {
                     </>
                   )}
                 </p>
-                {Object.entries(recData.recordings_by_channel || {}).map(([ch, rows]) => {
+                {Object.entries(recData.recordings_by_channel || {})
+                  .sort(([a], [b]) => Number(a) - Number(b))
+                  .map(([ch, rows]) => {
                   const err = rows && typeof rows === 'object' && 'error' in rows ? (rows as { error: string }).error : null;
                   const list = Array.isArray(rows) ? (rows as RecordingSlot[]) : [];
+                  const chNum = Number(ch) + 1;
                   return (
                     <section key={ch} className="channel-block">
                       <h3>
-                        {t('channelN')} {ch}
+                        {t('channelN')} {chNum}
                       </h3>
                       {err ? (
                         <p className="inline-error">{err}</p>
