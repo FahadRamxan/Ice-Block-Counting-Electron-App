@@ -467,7 +467,9 @@ export default function App() {
           </div>
         )}
 
-        {page === 'statistics' && <StatisticsPage t={t} />}
+        {page === 'statistics' && (
+          <StatisticsPage t={t} onOpenRecordings={() => setPage('recordings')} />
+        )}
 
         {page === 'nvrs' && (
           <div className="page page-nvrs">

@@ -1,13 +1,18 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Loader2, RefreshCw, BarChart3, Calendar, TrendingUp, Hash } from 'lucide-react';
-import { runs, type RunResult } from './lib/api';
+import { Loader2, RefreshCw, BarChart3, Calendar, TrendingUp, Hash, Film } from 'lucide-react';
+import { runs, type RunResult, nvrs as nvrsApi } from './lib/api';
 
 type Granularity = 'day' | 'week' | 'month' | 'year';
 
-type Props = { t: (k: string, v?: Record<string, string | number>) => string };
+type Props = {
+  t: (k: string, v?: Record<string, string | number>) => string;
+  onOpenRecordings: () => void;
+};
 
-export default function StatisticsPage({ t }: Props) {
+export default function StatisticsPage({ t, onOpenRecordings }: Props) {
   const [granularity, setGranularity] = useState<Granularity>('day');
+  const [nvrId, setNvrId] = useState<number | ''>('');
+  const [nvrList, setNvrList] = useState<{ id: number; name: string; ip: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [series, setSeries] = useState<
@@ -18,6 +23,10 @@ export default function StatisticsPage({ t }: Props) {
   const [recent, setRecent] = useState<RunResult[]>([]);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
+  useEffect(() => {
+    nvrsApi.list().then(setNvrList).catch(() => setNvrList([]));
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
@@ -27,18 +36,19 @@ export default function StatisticsPage({ t }: Props) {
       if (granularity === 'week') params.weeks = 12;
       if (granularity === 'month') params.months = 12;
       if (granularity === 'year') params.years = 5;
+      if (nvrId !== '') params.nvr_id = Number(nvrId);
       const data = await runs.statistics(params);
       setSeries(data.series);
       setTotals(data.totals);
       setRange({ from: data.from, to: data.to });
-      const rows = await runs.results();
-      setRecent(rows.slice(0, 25));
+      const rows = await runs.results(nvrId === '' ? undefined : { nvr_id: Number(nvrId) });
+      setRecent(rows.slice(0, 40));
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [granularity]);
+  }, [granularity, nvrId]);
 
   useEffect(() => {
     load();
@@ -52,6 +62,30 @@ export default function StatisticsPage({ t }: Props) {
         <h1>{t('statsTitle')}</h1>
         <p className="page-sub">{t('statsSub')}</p>
       </div>
+
+      <section className="panel panel-toolbar stats-recordings-panel">
+        <p className="form-hint" style={{ marginBottom: 14 }}>{t('statsRecordingsHint')}</p>
+        <div className="toolbar-row">
+          <div className="form-group">
+            <label>{t('labelNvr')}</label>
+            <select
+              className="select-lg"
+              value={nvrId === '' ? '' : String(nvrId)}
+              onChange={(e) => setNvrId(e.target.value ? Number(e.target.value) : '')}
+            >
+              <option value="">{t('statsAllNvrs')}</option>
+              {nvrList.map((n) => (
+                <option key={n.id} value={n.id}>{n.name} — {n.ip}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group form-group-actions">
+            <button type="button" className="primary" onClick={onOpenRecordings}>
+              <Film size={18} /> {t('statsOpenRecordings')}
+            </button>
+          </div>
+        </div>
+      </section>
 
       <div className="stats-toolbar">
         <div className="stats-tabs" role="tablist">
@@ -106,6 +140,8 @@ export default function StatisticsPage({ t }: Props) {
           <div className="stats-chart-loading">
             <Loader2 className="spin" size={32} />
           </div>
+        ) : series.length === 0 ? (
+          <p className="empty-hint">{t('statsNoRuns')}</p>
         ) : (
           <div className="stats-chart-wrap">
             <div className="stats-chart-bars">
@@ -150,6 +186,8 @@ export default function StatisticsPage({ t }: Props) {
             <thead>
               <tr>
                 <th>{t('statsColWhen')}</th>
+                <th>{t('statsColNvr')}</th>
+                <th>{t('statsColCh')}</th>
                 <th>{t('statsColDate')}</th>
                 <th>{t('statsColBlocks')}</th>
                 <th>{t('statsColSource')}</th>
@@ -159,6 +197,8 @@ export default function StatisticsPage({ t }: Props) {
               {recent.map((r) => (
                 <tr key={r.id}>
                   <td style={{ fontSize: 12 }}>{r.created_at?.slice(0, 19) ?? '—'}</td>
+                  <td>{r.nvr_name ?? '—'}</td>
+                  <td>{r.channel != null ? r.channel : '—'}</td>
                   <td>{r.run_date ?? '—'}</td>
                   <td className="count-cell">{r.total_unique_blocks ?? r.ice_block_count ?? '—'}</td>
                   <td>{r.source ?? '—'}</td>

@@ -1815,3 +1815,12 @@ html[dir='rtl'] .toolbar-row {
 .stats-tooltip strong {
   color: var(--accent);
 }
+.stats-recordings-panel .toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+}
+.stats-recordings-panel .form-group-actions {
+  margin-bottom: 2px;
+}

@@ -99,6 +99,7 @@ export const runs = {
     months?: number;
     years?: number;
     to?: string;
+    nvr_id?: number;
   }) => {
     const sp = new URLSearchParams();
     sp.set('granularity', params.granularity);
@@ -107,6 +108,7 @@ export const runs = {
     if (params.months != null) sp.set('months', String(params.months));
     if (params.years != null) sp.set('years', String(params.years));
     if (params.to) sp.set('to', params.to);
+    if (params.nvr_id != null) sp.set('nvr_id', String(params.nvr_id));
     return api<{
       granularity: string;
       from: string;
@@ -120,8 +122,8 @@ export const runs = {
 
 export interface RunResult {
   id: number;
-  run_date?: string;
   nvr_id?: number | null;
+  run_date?: string;
   nvr_name?: string | null;
   channel?: number | null;
   total_unique_blocks?: number;

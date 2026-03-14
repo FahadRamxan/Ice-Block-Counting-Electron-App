@@ -82,15 +82,23 @@ def _run_test_video_thread(video_path: str, model_path: str, max_frames: int | N
         _job["running"] = False
 
 
-def _statistics_series(granularity: str, date_from: str, date_to: str):
+def _statistics_series(granularity: str, date_from: str, date_to: str, nvr_id=None):
     init_db()
     conn = get_conn()
     try:
-        rows = conn.execute(
-            '''SELECT run_date, total_unique_blocks, left_platform, still_on_platform
-               FROM run_events WHERE run_date >= ? AND run_date <= ? ORDER BY run_date''',
-            (date_from, date_to),
-        ).fetchall()
+        if nvr_id is not None:
+            rows = conn.execute(
+                '''SELECT run_date, total_unique_blocks, left_platform, still_on_platform
+                   FROM run_events WHERE run_date >= ? AND run_date <= ? AND nvr_id = ?
+                   ORDER BY run_date''',
+                (date_from, date_to, int(nvr_id)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                '''SELECT run_date, total_unique_blocks, left_platform, still_on_platform
+                   FROM run_events WHERE run_date >= ? AND run_date <= ? ORDER BY run_date''',
+                (date_from, date_to),
+            ).fetchall()
     finally:
         conn.close()
     from collections import defaultdict
@@ -150,7 +158,8 @@ def statistics():
         n = int(request.args.get("years") or 5)
         from_dt = datetime(to_dt.year - max(1, n) + 1, 1, 1)
     from_s = from_dt.date().isoformat()
-    series = _statistics_series(g, from_s, to_s)
+    nvr_id = request.args.get("nvr_id", type=int)
+    series = _statistics_series(g, from_s, to_s, nvr_id)
     totals = {
         "total_blocks": sum(p["total_blocks"] for p in series),
         "total_runs": sum(p["run_count"] for p in series),
@@ -174,13 +183,22 @@ def statistics_seed_demo():
 @bp.route('/results', methods=['GET'])
 def list_results():
     init_db()
+    nvr_id = request.args.get("nvr_id", type=int)
     conn = get_conn()
     try:
-        rows = conn.execute(
-            '''SELECT id, run_date, nvr_name, channel, total_unique_blocks, left_platform,
-                      still_on_platform, source, created_at FROM run_events
-               ORDER BY created_at DESC LIMIT 200'''
-        ).fetchall()
+        if nvr_id is not None:
+            rows = conn.execute(
+                '''SELECT id, nvr_id, run_date, nvr_name, channel, total_unique_blocks, left_platform,
+                          still_on_platform, source, created_at FROM run_events
+                   WHERE nvr_id = ? ORDER BY created_at DESC LIMIT 200''',
+                (nvr_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                '''SELECT id, nvr_id, run_date, nvr_name, channel, total_unique_blocks, left_platform,
+                          still_on_platform, source, created_at FROM run_events
+                   ORDER BY created_at DESC LIMIT 200'''
+            ).fetchall()
         return jsonify([dict(r) for r in rows])
     finally:
         conn.close()
@@ -191,7 +209,7 @@ def summary():
 
 @bp.route('/run-for-date', methods=['POST'])
 def run_for_date():
-    """Body: date, nvr_id?, channels?: [1..15] — records intent; full NVR download pipeline optional."""
+    """Body: date, nvr_id?, channels?: [1..15] — one run_event per channel for Statistics."""
     data = request.get_json() or {}
     ch = data.get('channels')
     out_ch = []
@@ -206,12 +224,39 @@ def run_for_date():
         out_ch = sorted(set(out_ch))
     if not out_ch:
         out_ch = list(range(1, 16))
+    run_date = (data.get('date') or '')[:10]
+    if len(run_date) < 10:
+        run_date = datetime.utcnow().date().isoformat()
+    nvr_id = data.get('nvr_id')
+    nvr_name = None
+    try:
+        nid = int(nvr_id) if nvr_id is not None else None
+    except (TypeError, ValueError):
+        nid = None
+    if nid is not None:
+        init_db()
+        conn = get_conn()
+        try:
+            row = conn.execute('SELECT name FROM nvrs WHERE id = ?', (nid,)).fetchone()
+            if row:
+                nvr_name = row['name']
+        finally:
+            conn.close()
+    for c in out_ch:
+        try:
+            insert_run_event(
+                run_date, 0, 0, 0,
+                nvr_id=nid, nvr_name=nvr_name, channel=c,
+                source='nvr_recording',
+            )
+        except Exception:
+            pass
     return jsonify({
         'status': 'accepted',
-        'date': data.get('date', ''),
-        'nvr_id': data.get('nvr_id'),
+        'date': run_date,
+        'nvr_id': nid,
         'channels_1_15': out_ch,
-        'message': 'Selection recorded. Wire Dahua download + model per slot to execute runs.',
+        'message': 'Recorded per channel for Statistics. Wire Dahua + model for real block counts.',
     })
 
 @bp.route('/job-progress', methods=['GET'])
