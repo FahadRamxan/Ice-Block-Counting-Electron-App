@@ -26,19 +26,85 @@ On a **physical iPhone** (or Android phone), the app cannot use `localhost` — 
 
 The URL is saved and used on next launch. If Statistics (or any screen) shows "network request failed", set the API URL in Account as above.
 
-## Run the app
+## How to run the app
+
+All commands below assume you are in the **`mobile`** folder (next to the project root’s `backend/`).
+
+### 1. One-time setup
 
 ```bash
 cd mobile
 npm install
+```
+
+### 2. Start the development server (Metro)
+
+```bash
 npm start
 ```
 
-Then:
+This opens the **Expo dev tools** in the terminal and usually a URL in the browser. From that menu you can:
 
-- **Android:** press `a` in the terminal or run `npm run android`
-- **iOS (Mac only):** press `i` in the terminal or run `npm run ios`
-- **Expo Go:** scan the QR code **inside the Expo Go app** (tap “Scan QR code”), not with the iPhone Camera app. The Camera app shows “no usable data found” for Expo’s `exp://` URL; Expo Go opens it correctly. Use the same Wi‑Fi as your PC.
+| Action | Command |
+|--------|---------|
+| Open **Android** emulator / device | Press **`a`** in the terminal |
+| Open **iOS** simulator (Mac + Xcode only) | Press **`i`** in the terminal |
+| Open in **web browser** | Press **`w`** in the terminal |
+| Reload app | Press **`r`** |
+| Open dev menu | Press **`m`** |
+| Quit | **`Ctrl+C`** |
+
+**If port 8081 is busy** (or you see “Input is required” in a non-interactive shell):
+
+```bash
+npm run start:clear
+```
+
+This starts Metro on **port 8082** with a cleared cache.
+
+**Manual port:**
+
+```bash
+npx expo start --port 8083
+```
+
+### 3. Run modes (direct commands)
+
+You can skip the interactive menu and go straight to a target:
+
+| Mode | Command | Notes |
+|------|---------|--------|
+| **Default** (then choose platform in terminal) | `npm start` | Same as `expo start` |
+| **Web** (browser) | `npm run web` | Same as `expo start --web`. First time, Expo may prompt to install web dependencies; if it fails, run: `npx expo install react-dom react-native-web` |
+| **Android** | `npm run android` | Needs Android SDK / emulator or USB device with debugging |
+| **iOS simulator** | `npm run ios` | **Mac only**, Xcode installed |
+
+Examples:
+
+```bash
+cd mobile
+npm run web          # opens http://localhost:8081 (or the port Metro prints)
+npm run android      # tries to launch Android build
+npm run ios          # Mac: launches iOS Simulator
+```
+
+### 4. Physical phone with **Expo Go**
+
+1. Start the server: `npm start` or `npm run start:clear`.
+2. Install **[Expo Go](https://expo.dev/go)** (same **SDK 54** as this project).
+3. On **Android:** scan the QR code with Expo Go.
+4. On **iPhone:** open **Expo Go** → **Scan QR code** — do **not** use the system Camera app (it won’t open `exp://` links).
+5. Phone and PC must be on the **same Wi‑Fi**. Set **Account → Backend API URL** to `http://YOUR_PC_IP:5000` (see above).
+
+### 5. Backend (required for API screens)
+
+From the **repository root** (parent of `mobile/`):
+
+```bash
+python backend/run_flask.py
+```
+
+The mobile app expects the API at the URL configured in **Account** (or defaults: `localhost` on simulator, `10.0.2.2` on Android emulator).
 
 ## Screens
 
