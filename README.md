@@ -102,6 +102,48 @@ This compiles Electron TypeScript once, starts Vite, waits for **http://localhos
 | `npm run dev:electron` | Waits for port 3000, then Electron (Flask not started by this script alone). |
 | `npm run build` | Production Vite build + Electron `main` compile. |
 | `npm run preview` | Serve the built Vite app (after `build:react`). |
+| `npm run dist:win` | Production build + **Windows** portable EXE + NSIS installer (see below). |
+| `npm run dist` | Same as `dist:win` when run on Windows (uses `electron-builder` defaults for the host OS). |
+
+---
+
+## Build Windows installer / portable EXE
+
+Packaging uses **[electron-builder](https://www.electron.build/)**. It bundles the compiled UI, Electron `main`, the **`backend/`** tree, your **`venv/`** (so Flask + YOLO run without a separate Python install), and any **`.pt` files in the project root** into `release/`.
+
+**Before you pack**
+
+1. Complete **One-time setup** (Python venv with `pip install -r requirements.txt`, `npm install`).
+2. Put your weights file(s) in the **repo root** (same folder as `package.json`) so root-level `*.pt` files are copied into the app—at least one of the names the backend expects (see **Model weights** above).
+
+**Build (PowerShell, from repo root)**
+
+```powershell
+$env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
+npm run dist:win
+```
+
+`CSC_IDENTITY_AUTO_DISCOVERY=false` skips Windows code-signing prompts when you do not have a certificate.
+
+**Outputs** (under `release/`)
+
+| Artifact | Description |
+|----------|-------------|
+| **Portable** | `Ice Factory Block Counter 1.0.0.exe` (or similar)—no installer; double-click to run. |
+| **NSIS** | `Ice Factory Block Counter Setup 1.0.0.exe`—installer wizard. |
+| **`win-unpacked/`** | Unpacked app folder (useful for testing without generating the portable/installer again). Run `Ice Factory Block Counter.exe` inside it. |
+
+**Size:** The folder is large (Electron + Python + PyTorch in `venv`). That is expected.
+
+**Optional quick unpack only** (no portable/installer archives, faster iteration):
+
+```powershell
+npm run build
+$env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
+npx electron-builder --win --dir
+```
+
+**Code signing:** For production releases, configure a Windows signing certificate and remove or omit `CSC_IDENTITY_AUTO_DISCOVERY`; see [electron-builder code signing](https://www.electron.build/code-signing).
 
 ---
 

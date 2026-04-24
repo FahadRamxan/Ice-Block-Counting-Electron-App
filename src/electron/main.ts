@@ -9,19 +9,24 @@ let flaskProcess: ChildProcess | null = null;
 const isDev = process.env.NODE_ENV === 'development';
 const FLASK_PORT = 5000;
 
+/** Packaged apps put backend + venv in `resources/` (see electron-builder extraResources). */
+function resourceRoot(): string {
+  return app.isPackaged ? process.resourcesPath : app.getAppPath();
+}
+
 function startFlaskBackend(): Promise<void> {
   return new Promise((resolve) => {
-    const appPath = app.getAppPath();
-    const backendDir = path.join(appPath, 'backend');
-    const projectRoot = path.join(backendDir, '..');
+    const root = resourceRoot();
+    const backendDir = path.join(root, 'backend');
+    const projectRoot = root;
     const flaskScript = path.join(backendDir, 'run_flask.py');
     if (!fs.existsSync(flaskScript)) {
       resolve();
       return;
     }
     const venvPython = process.platform === 'win32'
-      ? path.join(appPath, 'venv', 'Scripts', 'python.exe')
-      : path.join(appPath, 'venv', 'bin', 'python');
+      ? path.join(root, 'venv', 'Scripts', 'python.exe')
+      : path.join(root, 'venv', 'bin', 'python');
     const pythonExe = fs.existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
     // Run Flask with cwd = project root so model/video paths (and any relative paths) match CLI
     flaskProcess = spawn(pythonExe, [flaskScript, '--port', String(FLASK_PORT)], {

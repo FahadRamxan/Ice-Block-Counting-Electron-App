@@ -10,7 +10,9 @@
     "build": "npm run build:react && npm run build:electron",
     "build:react": "vite build",
     "build:electron": "tsc -p src/electron/tsconfig.json",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -25,6 +27,62 @@
     "electron": "^33.2.1",
     "typescript": "~5.6.2",
     "vite": "^6.0.1",
-    "wait-on": "^7.2.0"
+    "wait-on": "^7.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.icefactory.blockcounter",
+    "productName": "Ice Factory Block Counter",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "dist-react/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!**/data/outputs/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "venv",
+        "to": "venv",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": ".",
+        "to": ".",
+        "filter": [
+          "*.pt"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
   }
 }

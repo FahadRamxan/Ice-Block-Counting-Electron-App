@@ -7,6 +7,10 @@ __pycache__/
 backend/data/outputs/
 *.avi
 
+# Packaged Electron apps (hundreds of MB — build locally with npm run dist:win)
+release/
+release-build/
+
 # Local DB + secrets (regenerated locally)
 backend/data/ice_factory.db
 backend/data/credentials.txt
