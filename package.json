@@ -1,6 +1,6 @@
 {
   "name": "ice-factory-block-counter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Ice block counting desktop app with multi-NVR support",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -12,7 +12,11 @@
     "build:electron": "tsc -p src/electron/tsconfig.json",
     "preview": "vite preview",
     "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win"
+    "setup:python-runtime": "powershell -ExecutionPolicy Bypass -File scripts/setup-embed-python.ps1",
+    "dist:win": "npm run build && node scripts/assert-python-runtime.cjs && electron-builder --win",
+    "release:patch": "npm version patch --no-git-tag-version && npm run dist:win",
+    "release:minor": "npm version minor --no-git-tag-version && npm run dist:win",
+    "release:major": "npm version major --no-git-tag-version && npm run dist:win"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -53,11 +57,12 @@
         ]
       },
       {
-        "from": "venv",
-        "to": "venv",
+        "from": "python-runtime",
+        "to": "python-runtime",
         "filter": [
           "**/*",
-          "!**/__pycache__/**"
+          "!**/__pycache__/**",
+          "!**/*.pyc"
         ]
       },
       {

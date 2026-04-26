@@ -25,6 +25,7 @@ import AuthPage from './AuthPage';
 import FloatingIceBackdrop from './FloatingIceBackdrop';
 import StatisticsPage from './StatisticsPage';
 import './index.css';
+import { APP_VERSION } from './version';
 
 const AUTH_STORAGE_KEY = 'awan_ice_user';
 
@@ -144,10 +145,34 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    api<{ status: string }>('/api/status')
-      .then(() => mounted && setBackendDown(false))
-      .catch(() => mounted && setBackendDown(true));
-    setLoading(false);
+    const isElectron =
+      typeof window !== 'undefined' &&
+      Boolean((window as unknown as { electron?: { getBaseUrl?: () => string } }).electron?.getBaseUrl);
+    // Flask + heavy imports (e.g. torch) can take a long time on first run; Electron also waits in main,
+    // but the UI must not treat the first failed fetch as permanent.
+    const attempts = isElectron ? 300 : 30;
+    const delayMs = 500;
+
+    const poll = async () => {
+      for (let i = 0; i < attempts && mounted; i++) {
+        try {
+          await api<{ status: string }>('/api/status');
+          if (mounted) {
+            setBackendDown(false);
+            setLoading(false);
+          }
+          return;
+        } catch {
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+      if (mounted) {
+        setBackendDown(true);
+        setLoading(false);
+      }
+    };
+
+    void poll();
     return () => {
       mounted = false;
     };
@@ -316,6 +341,9 @@ export default function App() {
           <button type="button" className="shell-brand" onClick={() => setPage('home')}>
             <Blocks size={26} className="shell-brand-icon" aria-hidden />
             <span className="shell-brand-text">{t('brandIceFactory')}</span>
+            <span className="shell-version" aria-label={`Version ${APP_VERSION}`}>
+              v{APP_VERSION}
+            </span>
           </button>
           <nav className="shell-nav" aria-label="Main">
             <button type="button" className={page === 'home' ? 'active' : ''} onClick={() => setPage('home')}>

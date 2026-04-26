@@ -39,7 +39,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     tileStatsTitle: 'Statistics',
     tileStatsDesc: 'NVR-scoped charts and recent runs from Recordings + Test model.',
     logOut: 'Log out',
-    backendUnreachable: 'Backend not reachable — start Flask: python backend/run_flask.py',
+    backendUnreachable:
+      'Could not reach the built-in server after waiting. If you use the desktop app, try again or check antivirus. For browser dev, run: python backend/run_flask.py',
     homeTitle: 'Block counter',
     homeSubtitle:
       'Configure NVRs, browse recordings by date across all channels, and test the model on local video.',
@@ -168,7 +169,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     tileStatsDesc: 'این وی آر چارٹ اور حالیہ چلاؤ۔',
     logOut: 'لاگ آؤٹ',
     backendUnreachable:
-      'سرور نہیں ملا — Flask چلائیں: python backend/run_flask.py',
+      'سرور تک رسائی نہیں ہو سکی۔ ڈیسک ٹاپ ایپ میں دوبارہ چلائیں یا اینٹی وائرس چیک کریں۔ براؤزر ڈیولپمنٹ کے لیے: python backend/run_flask.py',
     homeTitle: 'بلاک شمار',
     homeSubtitle:
       'این وی آر سیٹ کریں، تاریخ اور تمام چینلز کی ریکارڈنگ دیکھیں، مقامی ویڈیو پر ماڈل چلائیں۔',

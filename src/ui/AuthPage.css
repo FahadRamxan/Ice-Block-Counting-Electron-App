@@ -406,6 +406,23 @@ html[dir='rtl'] .auth-toolbar {
   justify-content: flex-start;
 }
 
+.auth-version {
+  position: fixed;
+  bottom: 0.75rem;
+  right: 0.75rem;
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
+  opacity: 0.85;
+  z-index: 2;
+  pointer-events: none;
+}
+html[dir='rtl'] .auth-version {
+  right: auto;
+  left: 0.75rem;
+}
+
 @media (max-width: 768px) {
   .auth-page {
     flex-direction: column;

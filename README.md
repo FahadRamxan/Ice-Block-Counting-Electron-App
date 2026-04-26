@@ -102,19 +102,28 @@ This compiles Electron TypeScript once, starts Vite, waits for **http://localhos
 | `npm run dev:electron` | Waits for port 3000, then Electron (Flask not started by this script alone). |
 | `npm run build` | Production Vite build + Electron `main` compile. |
 | `npm run preview` | Serve the built Vite app (after `build:react`). |
-| `npm run dist:win` | Production build + **Windows** portable EXE + NSIS installer (see below). |
+| `npm run setup:python-runtime` | **Windows EXE only:** download embeddable Python + `pip install -r requirements.txt` into `python-runtime/`. Run once before `dist:win`. |
+| `npm run dist:win` | Production build + **Windows** portable EXE + NSIS installer (see below). Requires `python-runtime/`. |
 | `npm run dist` | Same as `dist:win` when run on Windows (uses `electron-builder` defaults for the host OS). |
 
 ---
 
 ## Build Windows installer / portable EXE
 
-Packaging uses **[electron-builder](https://www.electron.build/)**. It bundles the compiled UI, Electron `main`, the **`backend/`** tree, your **`venv/`** (so Flask + YOLO run without a separate Python install), and any **`.pt` files in the project root** into `release/`.
+Packaging uses **[electron-builder](https://www.electron.build/)**. It bundles the compiled UI, Electron `main`, the **`backend/`** tree, a **self-contained `python-runtime/`** (embeddable Python + pip-installed deps), and any **`.pt` files in the project root** into `release/`.
+
+**Why not ship `venv/` inside the EXE?** On Windows, a virtualenv records the original Python path in `venv/pyvenv.cfg` (for example `C:\Python313\python.exe`). On another PC that path does not exist, so Flask never starts. **`python-runtime/`** avoids that by using the official **embeddable** layout plus libraries installed next to it.
 
 **Before you pack**
 
-1. Complete **One-time setup** (Python venv with `pip install -r requirements.txt`, `npm install`).
-2. Put your weights file(s) in the **repo root** (same folder as `package.json`) so root-level `*.pt` files are copied into the app—at least one of the names the backend expects (see **Model weights** above).
+1. Complete **One-time setup** (`npm install`). A normal **`venv/`** is still fine for **browser / dev** (`python backend/run_flask.py`); the EXE does **not** bundle `venv/` anymore.
+2. **Create `python-runtime/` once** (large download; includes PyTorch via `requirements.txt`):
+
+   ```powershell
+   npm run setup:python-runtime
+   ```
+
+3. Put your weights file(s) in the **repo root** so root-level `*.pt` files are copied into the app (see **Model weights** above).
 
 **Build (PowerShell, from repo root)**
 
@@ -133,12 +142,13 @@ npm run dist:win
 | **NSIS** | `Ice Factory Block Counter Setup 1.0.0.exe`—installer wizard. |
 | **`win-unpacked/`** | Unpacked app folder (useful for testing without generating the portable/installer again). Run `Ice Factory Block Counter.exe` inside it. |
 
-**Size:** The folder is large (Electron + Python + PyTorch in `venv`). That is expected.
+**Size:** The folder is large (Electron + embeddable Python + PyTorch). That is expected.
 
 **Optional quick unpack only** (no portable/installer archives, faster iteration):
 
 ```powershell
 npm run build
+node scripts/assert-python-runtime.cjs
 $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
 npx electron-builder --win --dir
 ```

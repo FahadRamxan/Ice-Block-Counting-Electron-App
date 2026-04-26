@@ -11,6 +11,9 @@ backend/data/outputs/
 release/
 release-build/
 
+# Self-contained embeddable Python for EXE (run npm run setup:python-runtime)
+python-runtime/
+
 # Local DB + secrets (regenerated locally)
 backend/data/ice_factory.db
 backend/data/credentials.txt

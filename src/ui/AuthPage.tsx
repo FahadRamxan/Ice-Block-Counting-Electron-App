@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Mail, Lock, User, LogIn, UserPlus, Sun, Moon, Languages } from 'lucide-react';
 import './AuthPage.css';
 import { useThemeLanguage } from './ThemeLanguageContext';
+import { APP_VERSION } from './version';
 
 function IceCubeLogo() {
   return (
@@ -249,6 +250,9 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
           )}
         </div>
       </div>
+      <p className="auth-version" aria-label="App version">
+        v{APP_VERSION}
+      </p>
     </div>
   );
 }

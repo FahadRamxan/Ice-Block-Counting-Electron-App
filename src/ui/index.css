@@ -994,6 +994,17 @@ button.icon-only:hover { background: rgba(248, 113, 113, 0.2); }
   -webkit-background-clip: text;
   background-clip: text;
 }
+.shell-brand .shell-version {
+  margin-left: 2px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  -webkit-text-fill-color: var(--text-muted);
+  opacity: 0.9;
+  align-self: flex-end;
+  padding-bottom: 1px;
+}
 /* One-line nav: single pill rail */
 .shell-nav {
   display: inline-flex;
