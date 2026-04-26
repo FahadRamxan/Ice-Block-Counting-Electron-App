@@ -97,9 +97,25 @@ function launchFlaskProcess(port) {
         appendFlaskLog('\nMissing python-runtime\\python.exe. On the build machine run: npm run setup:python-runtime\n');
         return false;
     }
+    const pathParts = [];
+    const embedSite = path_1.default.join(root, 'python-runtime', 'Lib', 'site-packages');
+    if (fs_1.default.existsSync(embedSite))
+        pathParts.push(embedSite);
+    if (!electron_1.app.isPackaged) {
+        const venvSite = path_1.default.join(root, 'venv', 'Lib', 'site-packages');
+        if (fs_1.default.existsSync(venvSite))
+            pathParts.push(venvSite);
+    }
+    pathParts.push(backendDir);
+    const pythonPath = pathParts.join(path_1.default.delimiter);
     flaskProcess = (0, child_process_1.spawn)(pythonExe, [flaskScript, '--port', String(port)], {
         cwd: projectRoot,
-        env: { ...process.env, FLASK_PORT: String(port), PYTHONPATH: backendDir },
+        env: {
+            ...process.env,
+            FLASK_PORT: String(port),
+            PYTHONPATH: pythonPath,
+            PYTHONNOUSERSITE: '1',
+        },
         windowsHide: true,
     });
     flaskProcess.stdout?.on('data', (data) => appendFlaskLog(data.toString()));

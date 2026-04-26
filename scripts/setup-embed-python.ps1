@@ -40,14 +40,26 @@ $PthLines = @(
 Set-Content -Path $Pth.FullName -Value ($PthLines -join "`r`n") -Encoding ascii
 Write-Host "Wrote $($Pth.Name) for pip + site-packages"
 
+$SitePackages = Join-Path $RuntimeDir "Lib\site-packages"
+New-Item -ItemType Directory -Path $SitePackages -Force | Out-Null
+
+# Prevent `%AppData%\Python\...\site-packages` from being visible during install.
+# Otherwise pip's resolver reports fake "conflicts" with poetry/streamlit/etc. you have globally.
+$env:PYTHONNOUSERSITE = "1"
+
 Write-Host "Installing pip..."
 $GetPip = Join-Path $env:TEMP "get-pip.py"
 Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $GetPip -UseBasicParsing
 $Py = Join-Path $RuntimeDir "python.exe"
-& $Py $GetPip --no-warn-script-location
+# -s = no user site-directory (same goal as PYTHONNOUSERSITE; belt and suspenders)
+& $Py -s $GetPip --no-warn-script-location
 
-Write-Host "Installing requirements (this can take several minutes; torch is large)..."
-& $Py -m pip install -r $Req
+Write-Host "Installing requirements into Lib\site-packages (forced --target; torch is large)..."
+# Embeddable layout: without --target, pip may install somewhere the embed exe does not load.
+& $Py -s -m pip install --no-cache-dir --upgrade --target $SitePackages --ignore-installed -r $Req
+
+Write-Host "Verifying imports (isolated from user site-packages)..."
+& $Py -s -c "import flask, flask_cors; import ultralytics; print('OK:', flask.__version__)"
 
 Write-Host ""
 Write-Host "Done. You can now run: npm run dist:win"

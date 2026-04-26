@@ -98,9 +98,23 @@ function launchFlaskProcess(port: number): boolean {
     );
     return false;
   }
+  const pathParts: string[] = [];
+  const embedSite = path.join(root, 'python-runtime', 'Lib', 'site-packages');
+  if (fs.existsSync(embedSite)) pathParts.push(embedSite);
+  if (!app.isPackaged) {
+    const venvSite = path.join(root, 'venv', 'Lib', 'site-packages');
+    if (fs.existsSync(venvSite)) pathParts.push(venvSite);
+  }
+  pathParts.push(backendDir);
+  const pythonPath = pathParts.join(path.delimiter);
   flaskProcess = spawn(pythonExe, [flaskScript, '--port', String(port)], {
     cwd: projectRoot,
-    env: { ...process.env, FLASK_PORT: String(port), PYTHONPATH: backendDir },
+    env: {
+      ...process.env,
+      FLASK_PORT: String(port),
+      PYTHONPATH: pythonPath,
+      PYTHONNOUSERSITE: '1',
+    },
     windowsHide: true,
   });
   flaskProcess.stdout?.on('data', (data) => appendFlaskLog(data.toString()));
