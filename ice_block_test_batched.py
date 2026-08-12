@@ -433,7 +433,8 @@ class EventBasedRegistry:
                  recent_merge_dist_px=150,
                  rollback_reappear_dist_px=200,
                  fps=25.0,
-                 resolver_exhausted_frames=5):
+                 resolver_exhausted_frames=5,
+                 oversized_freeze_max_frames=None):
         self.entry_side = entry_side
         self.platform_box = platform_box
         self.entry_corridor_depth_px = entry_corridor_depth_px
@@ -481,6 +482,30 @@ class EventBasedRegistry:
         # that its constants stay camera-invariant instead of being
         # tuned in raw frame counts for one particular capture rate.
         self.fps = fps if fps and fps > 0 else 25.0
+        # [Fix -- indefinite geometry freeze under sustained oversized/
+        # fused detections] See _update_matched_slot_geometry's own
+        # oversized_likely_fused branch for the full mechanism this
+        # closes (20260310225553131, slot=7): that branch has no expiry
+        # by design (protecting against a single fused frame should
+        # never require "waiting it out"), but a detector that stays
+        # fused for many CONSECUTIVE seconds -- a worker genuinely
+        # handling a block for a while -- leaves the slot's stored
+        # geometry frozen at wherever it was before the fusing started,
+        # while the real, still-fully-visible block keeps moving. By
+        # the time the detection separates back to a believable single-
+        # block size, it can have drifted far enough that it no longer
+        # matches its OWN frozen reference (Fast Association and even
+        # ordinary reconnect both reject it as SIZE_MISMATCH), so the
+        # still-continuously-tracked block gets kicked out to a brand
+        # new UnknownObservation and its real slot is orphaned. Default
+        # of 2.0s (fps-scaled, camera-invariant like every other timing
+        # constant here) chosen to comfortably outlast an ordinary
+        # single fused frame or two while still being far short of a
+        # multi-second occlusion.
+        self.oversized_freeze_max_frames = (
+            oversized_freeze_max_frames if oversized_freeze_max_frames is not None
+            else max(1, round(2.0 * self.fps))
+        )
         # Running estimate of "what does one block look like in pixels
         # right now, on this camera" -- an exponential moving average
         # over every confidently-matched detection's box, seeded by the
@@ -806,17 +831,39 @@ class EventBasedRegistry:
             # contact_frames, established_pos, snapshot_boxes) purely
             # from proximity + timing.
             #
-            # Now: the old slot id is left exactly as it already was --
-            # counted, gone -- permanently retired, never revived again.
-            # The count correction (claim 1) still happens, since that
-            # part has real evidence behind it. This detection instead
-            # mints a brand-new slot, exactly like any other fresh
-            # arrival, so no part of the old identity's history leaks
-            # into whatever block is actually here now. The caller
-            # (update_blocks) runs _update_matched_slot_geometry on the
-            # returned sid immediately after this, which fills in
-            # pos/box/ratio/high_ratio_frames for real -- the zeroed
-            # placeholders below only need to be structurally valid.
+            # Now: the old slot id is explicitly retired here -- counted,
+            # gone -- permanently, never revived again. The count
+            # correction (claim 1) still happens, since that part has
+            # real evidence behind it. This detection instead mints a
+            # brand-new slot, exactly like any other fresh arrival, so
+            # no part of the old identity's history leaks into whatever
+            # block is actually here now. The caller (update_blocks)
+            # runs _update_matched_slot_geometry on the returned sid
+            # immediately after this, which fills in pos/box/ratio/
+            # high_ratio_frames for real -- the zeroed placeholders
+            # below only need to be structurally valid.
+            #
+            # [Fix -- confirmed bug: assumed rather than enforced] This
+            # used to just ASSUME the old slot was already "state=gone,
+            # counted=True" from its original commit, and left
+            # self.slots[sid] completely untouched -- the comment even
+            # said so explicitly. That assumption doesn't always hold:
+            # if anything else touched this slot between its original
+            # commit and this rollback (the merge-back mechanism
+            # reviving it out of "gone" state is one confirmed way this
+            # can happen), state would silently be something other than
+            # "gone" at this exact point, and this function would never
+            # notice or correct it -- the slot then sits there,
+            # rendered, forever, since nothing else was ever going to
+            # touch it again either. Confirmed directly from user
+            # screenshot: a slot this exact rollback path printed
+            # "stays permanently retired" for was still drawn as an
+            # active green circle deep into the video. Now sets state
+            # and counted explicitly here instead of trusting they were
+            # already right.
+            if sid in self.slots:
+                self.slots[sid]["state"] = "gone"
+                self.slots[sid]["counted"] = True
             new_sid = self._next_slot_id
             self._next_slot_id += 1
             self.slots[new_sid] = {
@@ -1058,6 +1105,19 @@ class EventBasedRegistry:
     # this long has already proven itself untrustworthy regardless of
     # why.
     MAX_PARTIAL_ESTIMATE_STALE_FRAMES = 15
+
+    # [Fix -- see the tightened window in _check_prior_split's candidate
+    # search] What fraction of max_bound_occlusion_frames the merge-back
+    # search may look back across. Reusing the full value let a
+    # departing slot be matched as "the prior split" of an essentially
+    # unrelated slot from much earlier in the video, wrongly reviving it
+    # with nothing left to ever re-correct it -- confirmed directly from
+    # user report (a wrongly-revived slot sitting solid, visible, for
+    # the rest of the video). Kept proportional to max_bound_occlusion_
+    # frames rather than a flat frame count so it still scales correctly
+    # across different videos and frame rates -- just scaled down enough
+    # that it no longer spans most of a shorter video.
+    PRIOR_SPLIT_SEARCH_FRAMES_FRACTION = 0.35
     # [Temporary -- validation diagnostics] Gates _log_reconnect_
     # diagnostics, a per-reconnect dump of the full candidate pool, its
     # raw evidence, and which decision path (single candidate /
@@ -1351,17 +1411,31 @@ class EventBasedRegistry:
             # resolution and must not be silently absorbed out from
             # under it.
             and osid not in seen_slots
-            # [Fix -- stale orphaned sibling never reconciled] Was
-            # rollback_window_frames (90f/~3.6s, sized for a different
-            # problem -- see this method's own docstring). Reuses
-            # max_bound_occlusion_frames instead, the existing ceiling
-            # for how long ongoing occlusion may plausibly explain a
-            # slot's continued absence -- a sibling fragment slot is
-            # exactly that same kind of prolonged-occlusion situation,
-            # so it deserves the same generous window, not the short one
-            # meant for catching an immediate false-positive commit.
+            # [Fix -- window widened too far, causing false-positive
+            # revivals] Was rollback_window_frames (90f/~3.6s, sized for
+            # a different problem -- see this method's own docstring),
+            # then widened to the FULL max_bound_occlusion_frames
+            # (routinely 1000+ frames, a large fraction or even most of
+            # a shorter video) to fix a real, evidenced case of a
+            # genuine sibling created far in the past never being found.
+            # That fix traded one bug for another: confirmed directly
+            # from user report, a slot could now be matched as "the
+            # prior split" of an essentially unrelated, much-earlier
+            # slot purely because it fell within that huge window and
+            # passed the position/snapshot checks by coincidence --
+            # wrongly reviving it out of "gone" state, with nothing to
+            # ever re-correct it afterward, so it sat there, solid and
+            # visible, for the rest of the video. PRIOR_SPLIT_SEARCH_
+            # FRAMES_FRACTION keeps this fps-proportional (still scales
+            # correctly across different videos/frame rates, since it's
+            # derived from max_bound_occlusion_frames rather than a flat
+            # frame count) while substantially cutting how far back a
+            # merge-back may reach -- generous enough for the single-long
+            # -carry case that motivated the original widening, without
+            # spanning enough of the video to start matching against
+            # slots that have nothing to do with each other.
             and frame_idx - o.get("first_created_frame", o.get("created_frame", frame_idx))
-                <= self.max_bound_occlusion_frames
+                <= self.max_bound_occlusion_frames * self.PRIOR_SPLIT_SEARCH_FRAMES_FRACTION
         ]
         if verbose and candidates:
             print(f"    [merge-back-check] frame={frame_idx} slot={sid} just committed -- "
@@ -1618,79 +1692,6 @@ class EventBasedRegistry:
         the same frame never has its streak bumped more than once."""
         evaluated = []
         passed = []
-
-        # [Fix -- unambiguous same-frame fragment forced into temp-id
-        # limbo by a size check it never needed] Confirmed directly from
-        # user report and repeated log evidence across many videos:
-        # SIZE_MISMATCH is a chronic, systemic rejection reason for
-        # same-frame fragments of a single, genuinely occluded block --
-        # a fragment's box is often a very different SHAPE from the
-        # slot's last known box purely because a worker's hand is
-        # sitting across part of it, which has nothing to do with
-        # whether it's the same object. When there is exactly ONE slot
-        # in the entire registry that is even geometrically plausible
-        # for this detection (passes the entry-corridor and snapshot
-        # checks and sits within the predicted emergence region) --
-        # i.e. no other known block, no ambiguity, nothing else it
-        # could possibly be -- size similarity is redundant evidence:
-        # physical elimination has already done the job with no
-        # competing explanation left. Forcing a size match on top in
-        # that situation was rejecting the one and only candidate for
-        # no benefit, sending the fragment through the UnknownObservation
-        # staging path and, 5 frames later, minting it a brand-new,
-        # duplicate slot for a block that was never actually lost.
-        # Computed as a lightweight first pass over the exact same three
-        # checks the main loop below performs (entry-corridor, snapshot,
-        # prediction-region) -- deliberately NOT counting size, since
-        # that's the whole point -- so the main loop can look up "was I
-        # the only plausible one" for each same-frame candidate without
-        # re-deriving it. Only relaxes size for same_frame candidates:
-        # a cross-frame reconnect (real elapsed hidden time) is a weaker
-        # claim on its own and keeps the full size check regardless of
-        # how many other candidates exist.
-        geometrically_plausible_count = 0
-        for _sid, _s in self.slots.items():
-            if _s["counted"] or _s["state"] not in ("visible", "occluded"):
-                continue
-            _elapsed_frames = frame_idx - _s.get("last_seen_frame", frame_idx)
-            _same_frame = _sid in seen_slots
-            if _same_frame and _elapsed_frames != 0:
-                continue
-            if not _same_frame and _elapsed_frames <= 0:
-                continue
-            if not _same_frame and self._in_entry_corridor(pos):
-                continue
-            if (dist(pos, _s["pos"]) > self.STATIONARY_SELF_RECLAIM_DIST_PX
-                    and self._matches_snapshot(box, pos, _s.get("snapshot_boxes", []))):
-                continue
-            _vx, _vy = _s.get("velocity", (0.0, 0.0))
-            _pred_pos = (_s["pos"][0] + _vx * _elapsed_frames, _s["pos"][1] + _vy * _elapsed_frames)
-            # [Fix -- ambiguity check exploited by anything nearby,
-            # regardless of shape] Originally reused the same radius as
-            # the actual hard eliminator below (block_size*1.5, FLOORED
-            # AT occluded_match_dist_px = 200px) -- a radius sized for
-            # long-range cross-frame reconnect tolerance, not for
-            # deciding whether real ambiguity exists. On a platform
-            # where blocks are even moderately spread out, that floor
-            # alone made "only one slot within 200-300px" true almost
-            # everywhere, which made the SIZE_MISMATCH waiver below fire
-            # constantly -- letting ANY detection shape (a worker's leg,
-            # a shadow, an unrelated object) within that huge radius
-            # claim a slot with NO size verification at all, since the
-            # only gate protecting against that was the very check being
-            # waived. Confirmed as the likely mechanism directly from
-            # user report: a slot's marker walking, frame over frame,
-            # toward the nearest neighbor OR a nearby worker, eventually
-            # landing permanently on an unrelated block. This ambiguity
-            # radius is now block-scale ONLY -- no occluded_match_dist_px
-            # floor -- so "unambiguous" actually means "nothing else even
-            # remotely block-sized nearby," not "nothing else within a
-            # radius built for a completely different purpose."
-            _ambiguity_radius = self._block_size_estimate() * 1.5
-            if _ambiguity_radius <= 0 or dist(pos, _pred_pos) > _ambiguity_radius:
-                continue
-            geometrically_plausible_count += 1
-
         for sid, s in self.slots.items():
             if s["counted"] or s["state"] not in ("visible", "occluded"):
                 continue
@@ -1767,15 +1768,124 @@ class EventBasedRegistry:
                           f"slot's own hidden content, same_frame={same_frame})")
                 continue
 
-            # 1. Predicted emergence region -- HARD ELIMINATOR. At
-            # elapsed_frames == 0 this is simply distance-to-current-pos;
-            # no separate, tighter same-frame constant is used.
+            # 1. Predicted emergence region -- HARD ELIMINATOR for a
+            # CROSS-FRAME candidate only. At elapsed_frames == 0 this is
+            # simply distance-to-current-pos; no separate, tighter
+            # same-frame constant is used.
+            #
+            # [Architectural fix -- same-frame siblings still forced
+            # through hard eliminators built for cross-frame reconnect]
+            # same_frame (== sid in seen_slots) already means something
+            # very specific and very strong: ANOTHER detection THIS
+            # EXACT FRAME already resolved to this exact slot. That is
+            # not "geometrically plausible" evidence like the prediction
+            # -region math below -- it's direct, frame-local proof this
+            # physical block is currently claimed right here, right now.
+            # Confirmed directly from repeated user report across
+            # several rounds of narrower fixes (a same-frame ambiguity-
+            # count workaround, then a tightened version of it) that
+            # STILL let a genuine single-block occlusion's second
+            # fragment fail this or the size check below and mint its
+            # own duplicate slot -- the underlying problem was applying
+            # hard-eliminator machinery designed for "did a slot hidden
+            # for real elapsed time actually reappear here" to a
+            # completely different question ("is this piece part of the
+            # SAME frame's already-identified block"), which it was
+            # never built to answer and kept getting wrong in new ways
+            # each time it was patched narrower. The snapshot check
+            # above is the one mechanism in this class actually built
+            # and repeatedly proven, over many fix rounds this
+            # conversation, to correctly separate "sibling fragment of
+            # THIS block" from "a different, already-known neighboring
+            # block" -- so for same_frame candidates the ordinary
+            # cross-frame prediction-region radius (built for real
+            # elapsed occlusion time, and effectively unbounded once
+            # velocity extrapolation is added in) is NOT used as the
+            # gate. But that does not mean same_frame candidates get NO
+            # positional gate at all.
+            #
+            # [Fix -- unbounded same-frame merge] Confirmed directly
+            # from log evidence (20260310225553131): with same_frame
+            # candidates exempted from the prediction-region check
+            # entirely and no replacement ceiling in its place, every
+            # OTHER genuinely separate, physically distinct block
+            # detected in the same frame as an already-claimed slot was
+            # passing as a "same-frame sibling" of that slot regardless
+            # of how far away it actually was -- one recorded run had 5
+            # distinct blocks 100-400px apart all merged into a single
+            # slot, every frame, for roughly 3000 frames straight; none
+            # of them ever got their own slot id, and the platform's
+            # true count (5) came out as 2. same_frame is still strong,
+            # direct evidence that SOME fragment of a block was claimed
+            # this frame, but it says nothing about how far away a
+            # genuine second fragment of THAT SAME physical block can
+            # plausibly be -- that's exactly the question
+            # _fragment_centroid_ceiling() already answers elsewhere in
+            # this class for worker-split fragment reunification,
+            # deliberately hard-capped at 2*visible_match_dist_px
+            # regardless of a possibly-inflated block_size_estimate (see
+            # that method's own docstring). Reusing it here keeps the
+            # "direct frame-local evidence, no size match required"
+            # relaxation intact for genuine same-block splits while
+            # closing off the case where same_frame is actually masking
+            # several distinct objects.
             vx, vy = s.get("velocity", (0.0, 0.0))
             pred_pos = (s["pos"][0] + vx * elapsed_frames, s["pos"][1] + vy * elapsed_frames)
             block_size = self._block_size_estimate()
             radius = max(block_size * 1.5, self.occluded_match_dist_px)
             d = dist(pos, pred_pos)
-            if d > radius:
+            if same_frame:
+                same_frame_ceiling = self._fragment_centroid_ceiling()
+                if d > same_frame_ceiling:
+                    # [Fix -- shared-worker override] Confirmed directly
+                    # from user report + screenshot (20260312103845210,
+                    # ~13:16:36): a single long block, carried low and
+                    # spanning well past the worker's body on BOTH ends,
+                    # gets segmented as two disconnected fragments whose
+                    # centroids are legitimately farther apart than the
+                    # fixed 160px ceiling allows -- exactly the case that
+                    # ceiling was never meant to reject. The ceiling
+                    # exists to tell "genuine split fragment of ONE
+                    # block" apart from "two distinct objects that
+                    # happen to be in the same frame" (see this branch's
+                    # own comment above) -- centroid distance is a proxy
+                    # for that question, not the question itself. A much
+                    # more direct answer is available when it applies:
+                    # if THIS detection and slot={sid}'s own
+                    # already-claimed fragment (its current s["box"],
+                    # updated by the first fragment already resolved
+                    # this exact frame) are BOTH touching the same
+                    # single live worker's box, that worker is
+                    # physically holding both pieces right now -- direct
+                    # evidence they're one object, independent of how
+                    # far apart the two fragments' centroids happen to
+                    # read. Checked here, as a narrow override on the
+                    # ceiling specifically, rather than folded into the
+                    # ceiling itself, so the ordinary (no-worker-evidence)
+                    # case keeps exactly the same protection against
+                    # genuinely distinct objects it already had.
+                    shared_worker = any(
+                        not w.get("expired")
+                        and boxes_close(box, w["box"], self.worker_bind_margin_px)
+                        and boxes_close(s["box"], w["box"], self.worker_bind_margin_px)
+                        for w in self.workers.values()
+                    )
+                    if not shared_worker:
+                        if verbose:
+                            print(f"      - slot={sid} REJECTED: SAME_FRAME_TOO_FAR "
+                                  f"(same-frame candidate but dist={d:.0f}px > "
+                                  f"ceiling={same_frame_ceiling:.0f}px -- too far from slot's own "
+                                  f"position to plausibly be a split fragment of THIS block, and "
+                                  f"no single live worker's box touches both fragments; more "
+                                  f"likely a separate, distinct object claimed the same frame)")
+                        continue
+                    elif verbose:
+                        print(f"      - slot={sid} SAME_FRAME_TOO_FAR waived: dist={d:.0f}px > "
+                              f"ceiling={same_frame_ceiling:.0f}px, but this detection and "
+                              f"slot={sid}'s own already-claimed fragment this frame both touch "
+                              f"the same live worker's box -- direct evidence this one worker is "
+                              f"physically carrying both pieces right now")
+            elif d > radius:
                 if verbose:
                     print(f"      - slot={sid} REJECTED: OUTSIDE_PREDICTED_REGION "
                           f"(dist={d:.0f}px > radius={radius:.0f}px, "
@@ -1783,49 +1893,10 @@ class EventBasedRegistry:
                           f"same_frame={same_frame}) -- prediction failure is fatal")
                 continue
 
-            # 2. Size compatibility -- HARD ELIMINATOR, EXCEPT when this
-            # same-frame candidate is the sole geometrically plausible
-            # slot for this detection (see geometrically_plausible_count
-            # above) -- with nothing else it could possibly be, size is
-            # redundant confirmation, not a required precondition.
-            #
-            # [Fix -- backstop against a wildly wrong-shaped detection
-            # slipping through the waiver] Even with the tightened,
-            # block-scale ambiguity radius above, this is a second,
-            # independent line of defense: the waiver may NEVER apply to
-            # a detection whose own box area is grossly larger than one
-            # block's expected area (MAX_PARTIAL_ESTIMATE_AREA_FRACTION,
-            # already used elsewhere in this class for exactly this kind
-            # of "is this plausibly one block" sanity check) -- a
-            # worker's own bounding box is categorically bigger than an
-            # ice block's, so this alone rules out a worker silhouette
-            # claiming a slot no matter how "unambiguous" the position
-            # looked.
-            size_ok = self._box_size_similar(box, s["box"])
-            expected_single_block_area = self._block_size_estimate() ** 2
-            plausibly_one_block = (
-                expected_single_block_area <= 0
-                or box_area(box) <= expected_single_block_area * self.MAX_PARTIAL_ESTIMATE_AREA_FRACTION
-            )
-            unambiguous_same_frame = (
-                same_frame and geometrically_plausible_count == 1 and plausibly_one_block
-            )
-            if not size_ok and not unambiguous_same_frame:
-                if verbose:
-                    print(f"      - slot={sid} REJECTED: SIZE_MISMATCH "
-                          f"(detection box not a plausible match for slot's last known box, "
-                          f"same_frame={same_frame})")
-                continue
-            elif not size_ok and verbose:
-                print(f"      - slot={sid} SIZE_MISMATCH waived: sole geometrically plausible "
-                      f"candidate this frame (same_frame={same_frame}) -- no other slot could "
-                      f"possibly explain this detection, size similarity is redundant")
-
-            # 2b. Worker corroboration -- computed here (moved up from
-            # its old ranking-only spot below) so it's available for
-            # the new elapsed-time hard eliminator immediately
-            # following it. Tests every worker currently in
-            # occluded_by, not a single privileged one.
+            # 2. Worker corroboration -- computed BEFORE the size check
+            # below so real worker evidence can waive it (see that
+            # check's own comment for why). Tests every worker currently
+            # in occluded_by, not a single privileged one.
             #
             # [Fix -- worker handoff / worker-id churn] Also accepts any
             # CURRENTLY LIVE worker who is a recorded handoff_partner of
@@ -1857,7 +1928,69 @@ class EventBasedRegistry:
                             worker_emerging = True
                             break
 
-            # 2c. [Fix -- unrelated new arrival absorbed into a stale
+            # 3. Size compatibility -- HARD ELIMINATOR for both same-
+            # frame and cross-frame candidates, using the SAME absolute,
+            # EMA-calibrated reference either way -- UNLESS worker_
+            # emerging is already True.
+            #
+            # [Fix -- comparing against the wrong reference] This used to
+            # compare a cross-frame candidate against the SLOT's OWN last
+            # recorded box (_box_size_similar(box, s["box"])) -- but a
+            # block carried by a worker is visually unstable frame to
+            # frame by nature: sometimes just a sliver peeks past an arm,
+            # sometimes it sticks out past the worker on both ends and
+            # reads as huge. Confirmed directly from log evidence
+            # (20260312103845210, slot=4/slot=5): a slot's own last-
+            # recorded box happened to be captured mid-protrusion (300-
+            # 450px wide, category-different from a normal ~100-250px
+            # block), and every subsequent, perfectly ordinary,
+            # correctly-sized reappearance of the SAME physical block
+            # then failed size comparison against that one bad snapshot,
+            # every single frame, permanently -- minting a brand new
+            # slot for a block that never actually left. Switching to
+            # the running, many-observation EMA (_block_size_estimate)
+            # fixed that specific failure, but introduced a new one,
+            # also confirmed directly from log evidence on the very same
+            # video: the EMA itself starts small (6,400px^2 at frame 446)
+            # and climbs slowly across the whole run (still under
+            # 100,000px^2 by frame 9770) -- so a genuinely large or
+            # elongated block (this same long block, sticking out past
+            # the worker on both ends) can have its OWN correct,
+            # single-object detection rejected as "too big to be one
+            # block" simply because the average hasn't caught up yet,
+            # especially early in a video. Neither reference (one slot's
+            # last box, or a slow-converging global average) is reliable
+            # enough to hard-veto on alone for an object whose apparent
+            # size varies this much by nature. Worker evidence is the
+            # strongest available signal here and doesn't share this
+            # weakness -- a worker directly touching this exact detection
+            # (worker_emerging, just computed above) is direct physical
+            # evidence regardless of absolute size, so it waives the size
+            # gate entirely rather than being weighed against it. Only
+            # a detection with NO worker evidence at all still needs to
+            # clear the size gate -- exactly the case this check was
+            # actually built for (an unrelated, worker-less object -- a
+            # stray box, a shadow, noise -- reconnecting purely on
+            # position).
+            if not worker_emerging:
+                expected_single_block_area = self._block_size_estimate() ** 2
+                plausibly_one_block = (
+                    expected_single_block_area <= 0
+                    or box_area(box) <= expected_single_block_area * self.MAX_PARTIAL_ESTIMATE_AREA_FRACTION
+                )
+                if not plausibly_one_block:
+                    if verbose:
+                        print(f"      - slot={sid} REJECTED: SIZE_MISMATCH "
+                              f"(this detection's own box is far too large to plausibly be one "
+                              f"block, and no worker corroborates it -- likely a worker or other "
+                              f"non-block object, same_frame={same_frame})")
+                    continue
+            elif verbose:
+                print(f"      - slot={sid} SIZE_MISMATCH check waived: a live worker directly "
+                      f"corroborates this detection -- trusted over the (possibly still-"
+                      f"converging) average block size")
+
+            # 4. [Fix -- unrelated new arrival absorbed into a stale
             # occluded slot] HARD ELIMINATOR, but only past
             # RECONNECT_REQUIRE_WORKER_EMERGENCE_AFTER_SEC of hidden
             # time -- see that constant's own docstring. A same-frame
@@ -3121,7 +3254,35 @@ class EventBasedRegistry:
         both blocks' identities. Checked first, before the geometric
         test: a detection matching a recorded snapshot box is
         definitionally a different, already-known block, not this
-        slot's own hidden content, regardless of how close it sits."""
+        slot's own hidden content, regardless of how close it sits.
+
+        [Fix -- ceiling mismatched with this method's own stated
+        intent] This method's docstring above has always said "reappears
+        essentially where it was" -- but the actual ceiling used was
+        _fragment_centroid_ceiling() (160px), a constant built for a
+        completely different physical question: how far apart a same-
+        frame detector-split fragment of ONE block may legitimately land
+        from that block's center (can be a real block-width or more,
+        e.g. when a worker's body splits one block into two boxes on
+        either side). "Reappeared essentially where it was" and "is a
+        plausible sibling fragment of a block being split apart right
+        now" are not the same claim, and 160px is nowhere near
+        "essentially where it was" for the former. Confirmed directly
+        from log evidence (20260310225553131): a low-confidence,
+        low-ratio detection (ratio=0.146) landed 2px from a DIFFERENT,
+        already-visible slot's own immediately-prior detection, yet got
+        claimed by an unrelated occluded slot 143px away purely because
+        143 < 160 -- the same shape of bug independently confirmed with
+        slot=7/slot=5 (~160px, right at this same ceiling). Using
+        STATIONARY_SELF_RECLAIM_DIST_PX here instead -- the constant
+        this class already uses elsewhere for exactly "is this genuinely
+        the same, essentially-stationary object still right here" --
+        aligns the ceiling with what this method actually claims to do.
+        A slot that has moved a real distance while occluded still isn't
+        abandoned: it's exactly what the ordinary resolver chain
+        (_generate_reconnect_candidates, with its own worker-emergence
+        and ranking logic) exists to handle instead, per this method's
+        own docstring above."""
         best_sid, best_d = None, float("inf")
         for sid, s in self.slots.items():
             if s["counted"] or s["state"] == "gone":
@@ -3130,12 +3291,15 @@ class EventBasedRegistry:
                 continue
             if s["state"] == "occluded":
                 d = dist(pos, s["pos"])
-                if d > self.STATIONARY_SELF_RECLAIM_DIST_PX and self._matches_snapshot(box, pos, s.get("snapshot_boxes", [])):
-                    continue
-                # [Fix -- see _fragment_centroid_ceiling's own docstring
-                # for the full mechanism] Same missing centroid ceiling
-                # on top of the edge-gap test, same reasoning.
-                if d > self._fragment_centroid_ceiling():
+                # [Note] The snapshot check that used to sit here
+                # (reject if d > STATIONARY_SELF_RECLAIM_DIST_PX and
+                # this detection matches a recorded neighbor snapshot)
+                # is now subsumed by the flat ceiling immediately below:
+                # anything past STATIONARY_SELF_RECLAIM_DIST_PX is
+                # rejected outright regardless of snapshot match, so the
+                # snapshot-specific carve-out can never fire. Left out
+                # rather than kept as dead code.
+                if d > self.STATIONARY_SELF_RECLAIM_DIST_PX:
                     continue
                 if boxes_close(box, s["box"], self.visible_match_dist_px) and d < best_d:
                     best_d, best_sid = d, sid
@@ -3216,11 +3380,93 @@ class EventBasedRegistry:
             s["_frame_claim_boxes"].append(box)
 
         frame_union = union_boxes(s["_frame_claim_boxes"])
-        if self._looks_like_whole_block(frame_union):
+
+        # [Fix -- oversized raw detection accepted outright, swallowing
+        # a second, distinct object] _looks_like_whole_block only checks
+        # a LOWER bound (is this box big enough to plausibly be a whole
+        # block) -- there has never been an upper bound anywhere in this
+        # pipeline. Confirmed directly from log evidence: a single raw
+        # detection box, (200,162,714,525) = 514x363px, roughly 5-6x a
+        # normal single block's area, sailed straight through as
+        # RESET(whole) because it easily cleared the lower-bound area
+        # test with plenty of room to spare -- the test was never built
+        # to catch "too big," only "too small." This is almost certainly
+        # the detector momentarily fusing two adjacent, physically
+        # distinct blocks into one bounding box (common when blocks sit
+        # close together) -- ten frames later the detector correctly
+        # separated them again, but by then whatever had been briefly
+        # swallowed into the oversized box had no identity of its own
+        # left to reclaim: it just restarted as a fresh, unclaimed
+        # observation and was promoted into a brand-new, unnecessary
+        # slot. None of the existing MAX_PARTIAL_ESTIMATE_* caps catch
+        # this either -- they only bound how big a MULTI-FRAME
+        # accumulated union may grow, not a single frame's own raw
+        # detection that's already oversized on arrival, before any
+        # merging has even happened.
+        #
+        # Past MAX_PARTIAL_ESTIMATE_AREA_FRACTION (the same "how much
+        # bigger than one block is still plausibly one block" ceiling
+        # already trusted elsewhere in this class), a raw detection this
+        # large is no longer treated as reliable geometry for THIS slot
+        # at all -- the existing position/box is kept unchanged rather
+        # than snapping to what's very likely two objects' combined
+        # extent. The match itself still stands (this slot's ownership
+        # of this frame isn't in question, last_seen_frame etc. still
+        # update normally below) -- only the geometry is protected from
+        # being corrupted by a detection that shouldn't be trusted at
+        # face value.
+        block_size_for_sanity = self._block_size_estimate()
+        expected_area_for_sanity = block_size_for_sanity ** 2 if block_size_for_sanity > 0 else 0
+        oversized_likely_fused = (
+            expected_area_for_sanity > 0
+            and box_area(frame_union) > expected_area_for_sanity * self.MAX_PARTIAL_ESTIMATE_AREA_FRACTION
+        )
+
+        if oversized_likely_fused:
+            # [Fix -- see oversized_freeze_max_frames's own docstring in
+            # __init__ for the full mechanism] Track how many
+            # CONSECUTIVE frames this slot has now been frozen under
+            # this branch. Only increments while the condition holds
+            # (reset to 0 the instant a frame is NOT oversized, in
+            # either branch below) -- so this is genuinely "how long has
+            # the freeze been continuously in effect," not a lifetime
+            # counter. Past oversized_freeze_max_frames, trust this
+            # frame's own direct observation instead of continuing to
+            # protect a reference that's now more likely stale than the
+            # thing it's protecting against -- the same "prefer this
+            # frame's real geometry over an aging historical estimate"
+            # philosophy the elongation/area caps below already apply
+            # to the ordinary MERGE path, just extended to cover this
+            # branch too.
+            oversized_streak = s.get("_oversized_streak_frames", 0) + 1
+            s["_oversized_streak_frames"] = oversized_streak
+            if oversized_streak > self.oversized_freeze_max_frames:
+                new_box = frame_union
+                estimate_mode = "RESET(stale-oversized-freeze-expired)"
+                s["_oversized_streak_frames"] = 0
+                print(f"  [DIAG:geometry-guard] slot={sid} raw detection area="
+                      f"{box_area(frame_union)}px^2 still exceeds "
+                      f"{self.MAX_PARTIAL_ESTIMATE_AREA_FRACTION}x expected single-block area "
+                      f"({expected_area_for_sanity:.0f}px^2), but has now been frozen for "
+                      f"{oversized_streak} consecutive frames (> "
+                      f"{self.oversized_freeze_max_frames}) -- trusting this frame's own direct "
+                      f"observation over an increasingly stale reference (frame {frame_idx})")
+            else:
+                new_box = s.get("box", frame_union)
+                estimate_mode = "SKIP(oversized-likely-multi-object)"
+                print(f"  [DIAG:geometry-guard] slot={sid} raw detection area="
+                      f"{box_area(frame_union)}px^2 exceeds {self.MAX_PARTIAL_ESTIMATE_AREA_FRACTION}x "
+                      f"expected single-block area ({expected_area_for_sanity:.0f}px^2) -- likely two "
+                      f"objects fused by the detector, keeping existing geometry unchanged this frame "
+                      f"(frame {frame_idx}, frozen streak={oversized_streak}/"
+                      f"{self.oversized_freeze_max_frames})")
+        elif self._looks_like_whole_block(frame_union):
             new_box = frame_union
             estimate_mode = "RESET(whole)"
             s["_partial_streak_frames"] = 0
+            s["_oversized_streak_frames"] = 0
         else:
+            s["_oversized_streak_frames"] = 0
             base = s.get("_pre_frame_box") or frame_union
             merged = union_boxes([base, frame_union])
             # [Architectural fix -- unbounded estimate growth] The old
@@ -4712,6 +4958,35 @@ class EventBasedRegistry:
                     sid, mechanism, rejected_sids = self._resolve_detection_identity(pos, box, frame_idx, seen_slots, other_block_boxes)
 
             if sid is not None:
+                # [Fix -- OutsideTrack re-touch silently undoing its own
+                # state] _try_rollback_match's OutsideTrack branch (see
+                # its own docstring) can return the SAME, already-
+                # committed sid for a block still visibly leaving frame
+                # after departure -- it deliberately does its own direct
+                # pos/box update and sets state="departed" itself,
+                # specifically so this already-retired identity is never
+                # touched by the ordinary matched-slot pipeline again.
+                # Confirmed directly from log evidence
+                # (20260312103845210, slot=14): running
+                # _update_matched_slot_geometry on it anyway silently
+                # overwrote state="departed" back to "visible" (that
+                # function's own unconditional last line) on the very
+                # next line here -- which re-enters an already-departed
+                # slot into every "still on platform" tally permanently,
+                # and (via _accumulate_drag_evidence /
+                # _release_worker_binding, each harmless in isolation)
+                # does pointless work on an object that should be
+                # completely inert from this point on. Every OTHER path
+                # that can produce a non-None sid here already excludes
+                # s["counted"] before ever returning it (Fast
+                # Association, RecentlyOccludedOwnership, PriorityReclaim,
+                # the reconnect resolver, and _try_rollback_match's own
+                # "false positive -> brand new slot" branch all check
+                # this) -- OutsideTrack is the one deliberate exception,
+                # by design, so checking counted here catches exactly
+                # that one case and nothing else.
+                if self.slots[sid].get("counted", False):
+                    continue
                 self._update_matched_slot_geometry(sid, pos, box, ratio, frame_idx, seen_slots, mechanism)
                 # Drag-exit evidence gathering is unconditional now (no
                 # longer short-circuited by an inline direct-exit commit
