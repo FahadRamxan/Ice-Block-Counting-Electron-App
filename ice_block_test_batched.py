@@ -3298,7 +3298,7 @@ class EventBasedRegistry:
                 # anything past STATIONARY_SELF_RECLAIM_DIST_PX is
                 # rejected outright regardless of snapshot match, so the
                 # snapshot-specific carve-out can never fire. Left out
-                # rather than kept as dead code.
+                # rather ... than kept as dead code.
                 if d > self.STATIONARY_SELF_RECLAIM_DIST_PX:
                     continue
                 if boxes_close(box, s["box"], self.visible_match_dist_px) and d < best_d:
